@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#fbf9f6">
+  <meta name="description" content="TRY ON 试一试——跨平台商品截图导入、身体数据建档、个人形象生成与 AI 虚拟试穿">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="TRY ON">
+  <meta name="format-detection" content="telephone=no">
+  <title>TRY ON 试一试</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="stage">
+    <aside class="stage-note" aria-hidden="true">
+      <p class="eyebrow">TRY ON / INTERACTIVE PROTOTYPE</p>
+      <h1>把喜欢的衣服<br>先穿到自己身上</h1>
+      <p>上传商品截图，建立个人照片档案，在同一处完成试穿、比较与保存。</p>
+      <div class="stage-tags"><span>跨平台导入</span><span>视觉预览</span><span>轻量衣橱</span></div>
+      <p class="stage-tip">请在右侧手机界面中点击体验完整流程</p>
+    </aside>
+
+    <main class="device" aria-label="TRY ON AI 虚拟试穿应用">
+      <div class="statusbar" aria-hidden="true">
+        <span>9:41</span>
+        <span class="status-icons">▮▮▮  Wi-Fi  ▰</span>
+      </div>
+      <header id="appHeader" class="app-header"></header>
+      <section id="appContent" class="app-content" aria-live="polite"></section>
+      <nav id="bottomNav" class="bottom-nav" aria-label="主导航"></nav>
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      <div id="modalRoot"></div>
+    </main>
+  </div>
+  <aside id="installHint" class="install-hint" aria-label="添加到主屏幕提示">
+    <div class="install-mark">⇧</div>
+    <div><b>把 TRY ON 安装到 iPhone</b><p>点击 Safari 底部的分享按钮，再选择“添加到主屏幕”</p></div>
+    <button data-action="dismiss-install" aria-label="关闭安装提示">×</button>
+  </aside>
+  <script src="app.js"></script>
+</body>
+</html>

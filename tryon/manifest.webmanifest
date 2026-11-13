@@ -1,0 +1,27 @@
+{
+  "name": "TRY ON｜试一试",
+  "short_name": "TRY ON",
+  "description": "身体数据建档、个人形象生成与 AI 虚拟试穿体验",
+  "lang": "zh-CN",
+  "start_url": "./?source=homescreen",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fffdfb",
+  "theme_color": "#fbf9f6",
+  "categories": ["lifestyle", "shopping"],
+  "icons": [
+    {
+      "src": "assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
