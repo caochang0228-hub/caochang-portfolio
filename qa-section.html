@@ -1,0 +1,5 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>页面适配检查</title><link rel="stylesheet" href="./portfolio.css"><script>const qaId=new URLSearchParams(location.search).get("id")||"top";const qaStyle=document.createElement("style");qaStyle.textContent=`.portfolio-shell>section:not(#${qaId}){display:none!important}`;document.head.append(qaStyle);</script></head>
+<body><div id="root"></div><script src="./portfolio.js"></script><script>const qaMeasure=()=>{const section=document.getElementById(qaId);if(!section)return;document.body.dataset.qa=JSON.stringify({id:qaId,viewportWidth:innerWidth,viewportHeight:innerHeight,sectionWidth:section.scrollWidth,sectionHeight:section.scrollHeight,horizontalOverflow:section.scrollWidth>innerWidth+1,fitsViewport:section.scrollHeight<=innerHeight+1})};new MutationObserver(qaMeasure).observe(document.body,{childList:true,subtree:true});addEventListener("load",qaMeasure);setTimeout(qaMeasure,100);</script></body>
+</html>
