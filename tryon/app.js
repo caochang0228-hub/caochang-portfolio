@@ -1,6 +1,6 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 
-const CONFIG = window.TRYON_CONFIG || { apiBase: "", apiMode: "tencent-aiart" };
+const CONFIG = window.TRYON_CONFIG || { apiBase: "", apiMode: "fashn-tryon" };
 const PROFILE_KEY = "tryon-profile-v2";
 const PREFS_KEY = "tryon-prefs-v2";
 const DB_NAME = "tryon-local-v2";
@@ -368,7 +368,7 @@ function confirmPage() {
     <button class="setting-row" data-action="style-pref"><span>♙</span><span>风格偏好</span><b>${state.stylePrefs.join(" · ") || "未设置"} ›</b></button>
     <div class="setting-row"><span>✧</span><span>生成预览</span><b>标准（1张） ›</b></div>
   </div>
-  <div class="info-strip"><span>ⓘ</span><span>将调用腾讯云模特换装服务。单次生成按腾讯云实际计费，结果仅作为穿搭视觉参考。</span></div>
+  <div class="info-strip"><span>ⓘ</span><span>将调用 FASHN AI 换装服务。每张结果消耗 1 个 API credit，仅作为穿搭视觉参考。</span></div>
   <div class="sticky-actions"><button class="primary-btn full" data-action="generate">✧ 开始 AI 试穿</button></div>`;
 }
 
@@ -481,7 +481,7 @@ function wardrobePage() {
 function profilePage() {
   const avatar = state.personSrc || "assets/hero-young-v2.webp";
   return `<div class="profile-head"><img class="avatar" src="${avatar}" alt="我的头像"><div><h2>${escapeHtml(state.userName)} <span class="vip">本机体验版</span></h2><p>${state.profileReady ? "个人 AI 形象已建立" : "请先建立个人 AI 形象"}</p></div><button class="icon-btn" data-action="settings">›</button></div>
-  <div class="member-card"><div class="top"><h3>✦ 我的数字形象</h3><button data-action="photo-archive">${state.profileReady ? "管理形象" : "立即建立"} ›</button></div><div class="quota"><div><span>保存的试穿</span><b>${state.records.length} 次</b></div><div><span>AI 服务</span><b>${CONFIG.apiBase ? "腾讯云已连接" : "等待连接"}</b></div></div></div>
+  <div class="member-card"><div class="top"><h3>✦ 我的数字形象</h3><button data-action="photo-archive">${state.profileReady ? "管理形象" : "立即建立"} ›</button></div><div class="quota"><div><span>保存的试穿</span><b>${state.records.length} 次</b></div><div><span>AI 服务</span><b>${CONFIG.apiBase ? "AI 已连接" : "等待连接"}</b></div></div></div>
   <div class="profile-stats">
     <button class="stat-card" data-action="open-wardrobe"><b>${state.records.filter(x=>x.favorite).length}</b><span>我的收藏</span></button>
     <button class="stat-card" data-action="style-pref"><b>${state.stylePrefs.length}</b><span>风格偏好</span></button>
@@ -781,7 +781,7 @@ document.addEventListener("click", event => {
     "demo-person": () => { state.personSrc="assets/person-clean.webp"; state.usingDemo=true; state.profileReady=false; go("photoGuide"); },
     "person-reselect": () => go("personUpload"),
     "photo-next": () => go("bodyData"),
-    generate: () => { if (!state.consent) return openModal("需要图片处理授权", `<p>只有在你主动点击生成时，人物照和商品图才会发送至腾讯云进行本次换装。请先在隐私设置中允许。</p>`, `<button class="primary-btn full" data-action="privacy">查看并授权</button>`); state.progress=0; state.generationError=""; go("generating"); },
+    generate: () => { if (!state.consent) return openModal("需要图片处理授权", `<p>只有在你主动点击生成时，人物照和商品图才会发送至 AI 服务进行本次换装。请先在隐私设置中允许。</p>`, `<button class="primary-btn full" data-action="privacy">查看并授权</button>`); state.progress=0; state.generationError=""; go("generating"); },
     favorite: () => { state.favorite=!state.favorite; render(); toast(state.favorite ? "已收藏" : "已取消收藏"); },
     download: () => { const a=document.createElement("a"); a.href=state.resultSrc; a.download="TRY-ON-试穿预览.webp"; a.click(); toast("已开始下载预览图"); },
     compare: () => go("compare"),
@@ -792,7 +792,7 @@ document.addEventListener("click", event => {
     "smart-style": () => openModal("智能搭配", `<p>根据你当前选择的米白上衣，推荐轻酷叠穿、奶油柔光与先锋极简三种方向。</p><div class="look-row">${lookCard("assets/inspire-urban-v2.webp","轻酷叠穿","look-urban")}${lookCard("assets/inspire-soft-v2.webp","奶油柔光","look-soft")}${lookCard("assets/inspire-cool-v2.webp","先锋极简","look-cool")}</div>`),
     settings: () => go("settings"),
     "body-profile": () => go("bodyData"),
-    privacy: () => openModal("照片用途与隐私", `<p><b>本机保存：</b>个人全身照、身体数据和试穿记录保存在当前手机浏览器中。</p><p><b>生成处理：</b>点击“开始 AI 试穿”后，人物照和商品图会发送至你的腾讯云函数，再调用腾讯云模特换装接口；临时源图在生成结束后删除。</p><p><b>你的控制：</b>可在设置中删除照片、记录或全部本机个人数据。</p><button class="consent-row" data-action="toggle-consent"><span>${state.consent ? "✓" : ""}</span><b>允许在点击生成时发送图片至腾讯云</b></button>`),
+    privacy: () => openModal("照片用途与隐私", `<p><b>本机保存：</b>个人全身照、身体数据和试穿记录保存在当前手机浏览器中。</p><p><b>生成处理：</b>点击“开始 AI 试穿”后，人物照和商品图会以 Base64 发送至换装服务，不上传到 COS。临时处理副本会在任务结束后删除，最长一天自动清理。</p><p><b>你的控制：</b>可在设置中删除照片、记录或全部本机个人数据。</p><button class="consent-row" data-action="toggle-consent"><span>${state.consent ? "✓" : ""}</span><b>允许在点击生成时发送图片至 AI 服务</b></button>`),
     "style-pref": () => openModal("选择风格偏好", `<p>选择 1–4 个常用风格，会用于首页推荐与后续搭配。</p><div class="chips pref-chips" style="margin:12px 0 20px">${["简约","通勤","复古","中性","运动","甜美","轻酷","法式"].map(x=>`<button class="chip ${state.stylePrefs.includes(x)?"active":""}" data-action="toggle-pref" data-value="${x}">${x}</button>`).join("")}</div>`, `<button class="primary-btn full" data-action="save-prefs">保存偏好</button>`),
     "toggle-pref": () => { const value=trigger.dataset.value; state.stylePrefs = state.stylePrefs.includes(value) ? state.stylePrefs.filter(x=>x!==value) : state.stylePrefs.length<4 ? [...state.stylePrefs,value] : state.stylePrefs; closeModal(); actions["style-pref"](); },
     "save-prefs": () => { savePreferences(); closeModal(); render(); toast("风格偏好已保存"); },
@@ -803,7 +803,7 @@ document.addEventListener("click", event => {
     more: () => openModal("更多操作", `<div class="option-list"><button class="option-row" data-action="privacy"><span class="row-icon">▣</span><span><b>隐私说明</b></span><span class="chev">›</span></button><button class="option-row" data-action="help"><span class="row-icon">?</span><span><b>使用帮助</b></span><span class="chev">›</span></button></div>`),
     help: () => openModal("使用帮助", `<p><b>首次使用：</b>上传正面清晰全身照 → 确认照片 → 填写身体数据 → 建立个人形象。</p><p><b>试穿：</b>上传商品正面平铺图 → 选择服装类型 → 确认人物形象 → 调用腾讯云生成。</p><p><b>效果建议：</b>人物照建议 3:4、正面无遮挡；商品图只保留一件上衣、下装或连衣裙。</p>`),
     message: () => openModal("消息通知", `<div class="empty-state small"><span>♧</span><h3>暂无新消息</h3><p>生成完成、服务状态与隐私更新会显示在这里。</p></div>`),
-    upgrade: () => openModal("AI 服务说明", `<p>当前版本按腾讯云模特换装接口实际调用量计费，不设置虚拟会员套餐。</p>`),
+    upgrade: () => openModal("AI 服务说明", `<p>当前版本使用 FASHN Virtual Try-On v1.6，每生成 1 张结果消耗 1 个 API credit，不设置虚拟会员套餐。</p>`),
     manage: () => openModal("管理试穿记录", `<p>当前共有 <b>${state.records.length}</b> 条本机记录。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="clear-records">全部清理</button></div>`),
     swap: () => toast("已切换对比视图"),
     "clear-records": () => openModal("删除试穿记录", `<p>确认后将永久删除当前手机浏览器中的 ${state.records.length} 条试穿结果，个人全身照和身体数据不受影响。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="confirm-clear">确认删除</button></div>`),
