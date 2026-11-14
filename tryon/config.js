@@ -1,4 +1,4 @@
 window.TRYON_CONFIG = {
   apiBase: "",
-  apiMode: "tencent-aiart"
+  apiMode: "fashn-tryon"
 };
