@@ -1,12 +1,8 @@
 {
-  "name": "tryon-tencent-aiart-function",
-  "version": "1.0.0",
+  "name": "tryon-fashn-function",
+  "version": "2.0.0",
   "private": true,
   "main": "index.js",
-  "engines": { "node": ">=18" },
-  "dependencies": {
-    "cos-nodejs-sdk-v5": "^2.14.7",
-    "tencentcloud-sdk-nodejs": "4.1.344"
-  }
+  "engines": { "node": ">=18" }
 }
 
