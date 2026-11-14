@@ -1,18 +1,23 @@
-# TRY ON 腾讯云函数
+# TRY ON 无 COS 云函数
 
-此函数接收前端压缩后的全身照与服装图，临时上传到私有 COS，调用腾讯云 `ChangeClothes`，返回带有“图片由 AI 生成”标识的 Base64 结果，并在请求结束后删除两张临时源图。
+此函数接收前端压缩后的全身照与服装图，以 Base64 直接调用 FASHN Virtual Try-On v1.6，并把 Base64 结果返回给前端。它不创建 COS 对象，也不把照片写入本地文件。
 
 ## 环境变量
 
-- `TENCENT_REGION`：例如 `ap-guangzhou`
-- `COS_BUCKET`：已创建的私有 COS Bucket 完整名称
-- `ALLOWED_ORIGINS`：逗号分隔，例如 `https://u2zqev.com.cn,https://www.u2zqev.com.cn`
+- `FASHN_API_KEY`：FASHN Developer API 密钥。
+- `ALLOWED_ORIGINS`：逗号分隔，例如 `https://u2zqev.com.cn,https://www.u2zqev.com.cn`。
 
-不要把永久 SecretId 或 SecretKey 写入代码。云函数应绑定具备最小权限的运行角色，授权临时 COS 对象读写、删除及 `aiart:ChangeClothes`。
+不要把 API key 写入 GitHub 仓库或前端代码。应把密钥配置在云函数或其他 Serverless 平台的加密环境变量中。
 
 ## 路由
 
-- `GET /health`：健康检查
-- `POST /tryon`：真实 AI 换装
+- `GET /health`：健康检查。
+- `POST /tryon`：真实 AI 换装。
 
-发布函数 URL 后，将 `tryon/config.js` 中的 `apiBase` 修改为函数公开 HTTPS 地址，并在网关设置 CORS、单 IP 限流和费用告警。
+发布函数 URL 后，将前端 `config.js` 中的 `apiBase` 修改为公开 HTTPS 地址，并为接口设置 CORS、单 IP 限流和费用告警。
+
+## 隐私说明
+
+- 人物照和服装图以 Base64 发送，不会上传到 COS。
+- FASHN 文档说明：Base64 输入仅用于当次处理，任务完成后删除临时处理副本，并设置最长一天的自动清理兜底。
+- `return_base64: true` 时，输出仅在状态接口保留 60 分钟。
