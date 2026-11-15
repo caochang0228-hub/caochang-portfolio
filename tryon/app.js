@@ -610,7 +610,7 @@ function settingsPage() {
   <div class="settings-section"><h3>隐私与安全</h3><div class="menu-list"><button class="menu-item" data-action="privacy"><span>▣</span><b>隐私与授权</b><small>相机、相册、数据权限 ›</small></button><button class="menu-item" data-action="account"><span>◉</span><b>账号与安全</b><small>手机号、密码、登录管理 ›</small></button></div></div>
   <div class="settings-section"><h3>服务与帮助</h3><div class="menu-list"><button class="menu-item" data-action="help"><span>?</span><b>客服帮助</b><small>在线咨询 · 常见问题 ›</small></button></div></div>
   <button class="danger-btn" data-action="delete-all-data">删除本机全部个人数据</button>
-  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v1.6 双通道形象生成版</p>`;
+  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v1.7 双通道形象生成版</p>`;
 }
 
 function bindInputs() {
@@ -804,7 +804,10 @@ async function callGradioDirect(base, endpoint, data, options = {}) {
       for (const block of blocks) {
         const parsed = parseSseBlock(block);
         options.onEvent?.(parsed.event, parsed.data);
-        if (parsed.event === "error") throw new Error(parsed.data || "HF_GENERATION_FAILED");
+        if (parsed.event === "error") {
+          const detail = String(parsed.data || "").trim();
+          throw new Error(!detail || detail === "null" ? "HF_GENERATION_FAILED" : detail);
+        }
         if (parsed.event === "complete") return JSON.parse(parsed.data || "null");
       }
       if (done) break;
@@ -960,7 +963,7 @@ async function createWhiteBackgroundAvatar(source) {
     { base: AVATAR_API_BASE, endpoint: "image", data: uploaded => [uploaded], pick: result => result?.[1] || result?.[0], timeout: 90000, label: "主通道" },
     { base: AVATAR_CPU_FALLBACK, endpoint: "update_ui", data: uploaded => [uploaded, "PNG"], pick: result => result?.[1] || result?.[0], timeout: 180000, label: "备用 CPU 通道" }
   ];
-  let lastError;
+  const failures = [];
   for (const backend of backends) {
     try {
       const status = $("#avatarStatus");
@@ -972,13 +975,14 @@ async function createWhiteBackgroundAvatar(source) {
       if (!/^https?:|^data:/i.test(file)) file = `${backend.base}/gradio_api/file=${encodeURIComponent(file)}`;
       return await compositeOnWhite(file);
     } catch (error) {
-      lastError = error;
+      const detail = String(error?.message || error || "UNKNOWN_ERROR");
+      failures.push(`${backend.label}:${detail === "null" ? "HF_GENERATION_FAILED" : detail}`);
       const status = $("#avatarStatus");
       if (status) status.textContent = `${backend.label}暂不可用，正在切换备用服务…`;
       await delay(300);
     }
   }
-  throw lastError || new Error("AVATAR_ALL_BACKENDS_FAILED");
+  throw new Error(`AVATAR_ALL_BACKENDS_FAILED | ${failures.join(" | ")}`);
 }
 
 function friendlyAvatarError(error) {
