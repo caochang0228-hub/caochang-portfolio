@@ -368,7 +368,7 @@ function confirmPage() {
     <button class="setting-row" data-action="style-pref"><span>♙</span><span>风格偏好</span><b>${state.stylePrefs.join(" · ") || "未设置"} ›</b></button>
     <div class="setting-row"><span>✧</span><span>生成预览</span><b>标准（1张） ›</b></div>
   </div>
-  <div class="info-strip"><span>ⓘ</span><span>将调用 Hugging Face ZeroGPU 上的开源 CatVTON 模型。免费额度有限，高峰期可能需要排队。</span></div>
+  <div class="info-strip"><span>ⓘ</span><span>将调用 Hugging Face ZeroGPU 上的开源真实试穿模型。匿名免费额度有限，高峰期可能需要排队。</span></div>
   <div class="sticky-actions"><button class="primary-btn full" data-action="generate">✧ 开始 AI 试穿</button></div>`;
 }
 
@@ -504,7 +504,7 @@ function settingsPage() {
   <div class="settings-section"><h3>隐私与安全</h3><div class="menu-list"><button class="menu-item" data-action="privacy"><span>▣</span><b>隐私与授权</b><small>相机、相册、数据权限 ›</small></button><button class="menu-item" data-action="account"><span>◉</span><b>账号与安全</b><small>手机号、密码、登录管理 ›</small></button></div></div>
   <div class="settings-section"><h3>服务与帮助</h3><div class="menu-list"><button class="menu-item" data-action="help"><span>?</span><b>客服帮助</b><small>在线咨询 · 常见问题 ›</small></button></div></div>
   <button class="danger-btn" data-action="delete-all-data">删除本机全部个人数据</button>
-  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v1.2 CatVTON ZeroGPU 版</p>`;
+  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v1.2 Hugging Face ZeroGPU 版</p>`;
 }
 
 function bindInputs() {
@@ -571,27 +571,77 @@ function processImageFile(file) {
   });
 }
 
+let gradioClientPromise;
+
+async function getGradioClient() {
+  if (!gradioClientPromise) {
+    gradioClientPromise = import("https://cdn.jsdelivr.net/npm/@gradio/client@2.7.0/dist/index.min.js")
+      .then(async ({ Client, handle_file }) => ({
+        client: await Client.connect(CONFIG.spaceId || CONFIG.apiBase),
+        handleFile: handle_file
+      }));
+  }
+  return gradioClientPromise;
+}
+
 async function callTryOnApi() {
-  if (!CONFIG.apiBase) throw new Error("AI_BACKEND_NOT_CONFIGURED");
+  if (!CONFIG.apiBase && !CONFIG.spaceId) throw new Error("AI_BACKEND_NOT_CONFIGURED");
   if (!state.personSrc || !state.productSrc) throw new Error("MISSING_IMAGES");
+
+  if (CONFIG.apiMode === "hf-public-leffa") {
+    const requestId = globalThis.crypto?.randomUUID?.() || `tryon-${Date.now()}`;
+    state.requestId = requestId;
+    const category = { top: "upper", bottom: "lower", dress: "dress" }[state.garmentType] || "upper";
+    const timeout = new Promise((_, reject) => {
+      setTimeout(() => {
+        const error = new Error("HF_TIMEOUT");
+        error.name = "AbortError";
+        reject(error);
+      }, 300000);
+    });
+    const task = (async () => {
+      const { client, handleFile } = await getGradioClient();
+      const [personBlob, garmentBlob] = await Promise.all([
+        fetch(state.personSrc).then(response => response.blob()),
+        fetch(state.productSrc).then(response => response.blob())
+      ]);
+      const result = await client.predict("/tryon", {
+        person_image: handleFile(personBlob),
+        garment_image: handleFile(garmentBlob),
+        category,
+        garment_is_worn: false,
+        request_hash: requestId,
+        steps: 24,
+        scale: 2.5,
+        seed: 42
+      });
+      const payload = Array.isArray(result?.data) ? result.data[0] : result?.data;
+      if (!payload?.ok || !payload?.image) {
+        const error = new Error(payload?.message || payload?.error_code || "HF_GENERATION_FAILED");
+        error.code = payload?.error_code;
+        error.requestId = payload?.request_hash || requestId;
+        throw error;
+      }
+      return { image: payload.image, requestId: payload.request_hash || requestId };
+    })();
+    return Promise.race([task, timeout]);
+  }
+
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 300000);
+  const timeoutId = setTimeout(() => controller.abort(), 300000);
   const base = CONFIG.apiBase.replace(/\/$/, "");
   const garmentType = { top: "upper", bottom: "lower", dress: "overall" }[state.garmentType] || "upper";
   try {
     const startResponse = await fetch(`${base}/gradio_api/call/try_on`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        data: [state.personSrc, state.productSrc, garmentType, 30, 2.5, -1]
-      }),
+      body: JSON.stringify({ data: [state.personSrc, state.productSrc, garmentType, 30, 2.5, -1] }),
       signal: controller.signal
     });
     const started = await startResponse.json().catch(() => ({}));
     if (!startResponse.ok || !started.event_id) {
       throw new Error(started.detail || started.message || `HF_START_${startResponse.status}`);
     }
-
     state.requestId = started.event_id;
     const resultResponse = await fetch(
       `${base}/gradio_api/call/try_on/${encodeURIComponent(started.event_id)}`,
@@ -599,7 +649,6 @@ async function callTryOnApi() {
     );
     const eventText = await resultResponse.text();
     if (!resultResponse.ok) throw new Error(`HF_RESULT_${resultResponse.status}`);
-
     const events = eventText.trim().split(/\n\n+/);
     for (let i = events.length - 1; i >= 0; i -= 1) {
       const block = events[i];
@@ -614,7 +663,7 @@ async function callTryOnApi() {
     }
     throw new Error("HF_INCOMPLETE_RESULT");
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(timeoutId);
   }
 }
 
@@ -810,7 +859,7 @@ document.addEventListener("click", event => {
     "smart-style": () => openModal("智能搭配", `<p>根据你当前选择的米白上衣，推荐轻酷叠穿、奶油柔光与先锋极简三种方向。</p><div class="look-row">${lookCard("assets/inspire-urban-v2.webp","轻酷叠穿","look-urban")}${lookCard("assets/inspire-soft-v2.webp","奶油柔光","look-soft")}${lookCard("assets/inspire-cool-v2.webp","先锋极简","look-cool")}</div>`),
     settings: () => go("settings"),
     "body-profile": () => go("bodyData"),
-    privacy: () => openModal("照片用途与隐私", `<p><b>本机保存：</b>个人全身照、身体数据和试穿记录保存在当前手机浏览器中。</p><p><b>生成处理：</b>点击“开始 AI 试穿”后，人物照和商品图会以 Base64 发送至换装服务，不上传到 COS。临时处理副本会在任务结束后删除，最长一天自动清理。</p><p><b>你的控制：</b>可在设置中删除照片、记录或全部本机个人数据。</p><button class="consent-row" data-action="toggle-consent"><span>${state.consent ? "✓" : ""}</span><b>允许在点击生成时发送图片至 AI 服务</b></button>`),
+    privacy: () => openModal("照片用途与隐私", `<p><b>本机保存：</b>个人全身照、身体数据和试穿记录保存在当前手机浏览器中。</p><p><b>生成处理：</b>点击“开始 AI 试穿”后，人物照和商品图会发送至第三方 Hugging Face 公共 ZeroGPU Space 进行临时推理，不上传到腾讯云 COS，也不会加入本应用的永久云端相册。请勿上传身份证件或其他敏感照片。</p><p><b>你的控制：</b>可在设置中删除照片、记录或全部本机个人数据。</p><button class="consent-row" data-action="toggle-consent"><span>${state.consent ? "✓" : ""}</span><b>允许在点击生成时发送图片至 AI 服务</b></button>`),
     "style-pref": () => openModal("选择风格偏好", `<p>选择 1–4 个常用风格，会用于首页推荐与后续搭配。</p><div class="chips pref-chips" style="margin:12px 0 20px">${["简约","通勤","复古","中性","运动","甜美","轻酷","法式"].map(x=>`<button class="chip ${state.stylePrefs.includes(x)?"active":""}" data-action="toggle-pref" data-value="${x}">${x}</button>`).join("")}</div>`, `<button class="primary-btn full" data-action="save-prefs">保存偏好</button>`),
     "toggle-pref": () => { const value=trigger.dataset.value; state.stylePrefs = state.stylePrefs.includes(value) ? state.stylePrefs.filter(x=>x!==value) : state.stylePrefs.length<4 ? [...state.stylePrefs,value] : state.stylePrefs; closeModal(); actions["style-pref"](); },
     "save-prefs": () => { savePreferences(); closeModal(); render(); toast("风格偏好已保存"); },
@@ -819,9 +868,9 @@ document.addEventListener("click", event => {
     "delete-photo": () => openModal("删除个人照片？", `<p>删除后，现有试穿记录仍会保留，但再次生成前必须上传新的全身照。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="confirm-delete-photo">确认删除</button></div>`),
     "confirm-delete-photo": async () => { await dbDelete("profileImage"); localStorage.removeItem(PROFILE_KEY); state.personSrc=""; state.profileReady=false; closeModal(); render(); toast("个人照片已删除"); },
     more: () => openModal("更多操作", `<div class="option-list"><button class="option-row" data-action="privacy"><span class="row-icon">▣</span><span><b>隐私说明</b></span><span class="chev">›</span></button><button class="option-row" data-action="help"><span class="row-icon">?</span><span><b>使用帮助</b></span><span class="chev">›</span></button></div>`),
-    help: () => openModal("使用帮助", `<p><b>首次使用：</b>上传正面清晰全身照 → 确认照片 → 填写身体数据 → 建立个人形象。</p><p><b>试穿：</b>上传商品正面平铺图 → 选择服装类型 → 确认人物形象 → 调用腾讯云生成。</p><p><b>效果建议：</b>人物照建议 3:4、正面无遮挡；商品图只保留一件上衣、下装或连衣裙。</p>`),
+    help: () => openModal("使用帮助", `<p><b>首次使用：</b>上传正面清晰全身照 → 确认照片 → 填写身体数据 → 建立个人形象。</p><p><b>试穿：</b>上传商品正面平铺图 → 选择服装类型 → 确认人物形象 → 调用 Hugging Face ZeroGPU 真实生成。</p><p><b>效果建议：</b>人物照建议 3:4、正面无遮挡；商品图只保留一件上衣、下装或连衣裙。</p>`),
     message: () => openModal("消息通知", `<div class="empty-state small"><span>♧</span><h3>暂无新消息</h3><p>生成完成、服务状态与隐私更新会显示在这里。</p></div>`),
-    upgrade: () => openModal("AI 服务说明", `<p>当前版本使用 FASHN Virtual Try-On v1.6，每生成 1 张结果消耗 1 个 API credit，不设置虚拟会员套餐。</p>`),
+    upgrade: () => openModal("AI 服务说明", `<p>当前版本使用 Hugging Face ZeroGPU 的开源试穿模型，不收取费用；匿名用户每天有少量 GPU 额度，高峰期可能排队。</p>`),
     manage: () => openModal("管理试穿记录", `<p>当前共有 <b>${state.records.length}</b> 条本机记录。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="clear-records">全部清理</button></div>`),
     swap: () => toast("已切换对比视图"),
     "clear-records": () => openModal("删除试穿记录", `<p>确认后将永久删除当前手机浏览器中的 ${state.records.length} 条试穿结果，个人全身照和身体数据不受影响。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="confirm-clear">确认删除</button></div>`),
