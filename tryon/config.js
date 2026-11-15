@@ -1,4 +1,4 @@
 window.TRYON_CONFIG = {
   apiBase: "",
-  apiMode: "fashn-tryon"
+  apiMode: "hf-zero-gpu"
 };
