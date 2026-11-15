@@ -781,6 +781,13 @@ function parseSseBlock(block) {
   return { event, data };
 }
 
+function formatApiErrorDetail(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  try { return JSON.stringify(value); }
+  catch (error) { return String(value); }
+}
+
 async function callGradioDirect(base, endpoint, data, options = {}) {
   const cleanBase = base.replace(/\/$/, "");
   const controller = new AbortController();
@@ -794,7 +801,10 @@ async function callGradioDirect(base, endpoint, data, options = {}) {
       signal: controller.signal
     });
     const started = await startResponse.json().catch(() => ({}));
-    if (!startResponse.ok || !started.event_id) throw new Error(started.detail || started.message || `HF_START_${startResponse.status}`);
+    if (!startResponse.ok || !started.event_id) {
+      const detail = formatApiErrorDetail(started.detail || started.message);
+      throw new Error(detail ? `HF_START_${startResponse.status}: ${detail}` : `HF_START_${startResponse.status}`);
+    }
     state.requestId = started.event_id;
     options.onEvent?.("pending", null);
     const resultResponse = await fetch(`${cleanBase}/gradio_api/call/${endpoint}/${encodeURIComponent(started.event_id)}`, {
@@ -991,7 +1001,9 @@ async function createDigitalAvatar(source) {
   const result = await callGradioDirect(
     AVATAR_GENERATOR_BASE,
     "edit",
-    [uploaded, prompt, "", null, 0, true, 1.5, 4, true, 88, 1280, true],
+    // The live /edit schema currently contains 13 positional parameters.
+    // lock_face_hair was appended after fix_hands; omitting it now returns HTTP 422.
+    [uploaded, prompt, "", null, 0, true, 1.5, 4, true, 88, 1280, true, true],
     { timeout: 300000 }
   );
   let file = extractRemoteFile(Array.isArray(result) ? result[0] : result);
@@ -1033,6 +1045,7 @@ function friendlyAvatarError(error) {
   const text = String(error?.message || error || "");
   if (error?.name === "AbortError" || /TIMEOUT/i.test(text)) return "正面形象生成等待超时，请稍后重新生成。";
   if (/quota|ZeroGPU|429|capacity|busy/i.test(text)) return "今天的免费 GPU 额度可能已经用完，请在额度恢复后再生成正面数字形象。";
+  if (/HF_START_422|validation error|field required|missing/i.test(text)) return "形象模型接口刚刚更新，请刷新页面后重新生成。";
   if (/HF_UPLOAD|Failed to fetch|network|fetch/i.test(text)) return "手机网络暂时无法连接生成式形象服务，请切换稳定 Wi-Fi 后重试。";
   if (/HF_GENERATION_FAILED|AVATAR_GENERATIVE_EMPTY_RESULT/i.test(text)) return "生成式模型没有返回完整形象，请更换面部更清晰的照片后重试。";
   return text.length < 120 ? text : "正面数字形象服务暂时不可用，请稍后重试。";
