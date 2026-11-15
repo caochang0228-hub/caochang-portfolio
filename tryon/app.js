@@ -5,6 +5,7 @@ const PROFILE_KEY = "tryon-profile-v2";
 const PREFS_KEY = "tryon-prefs-v2";
 const DB_NAME = "tryon-local-v2";
 const DB_STORE = "assets";
+const AVATAR_SPACE_ID = "briaai/BRIA-RMBG-2.0";
 
 const state = {
   screen: "welcome",
@@ -18,12 +19,22 @@ const state = {
   garmentType: "top",
   productName: "短款翻领夹克",
   productSrc: "assets/garment-clean.webp",
+  productOriginalSrc: "assets/garment-clean.webp",
+  cropZoom: 1,
+  cropX: 0,
+  cropY: 0,
+  cropApplied: false,
   personSrc: "",
+  personOriginalSrc: "",
   resultSrc: "assets/result-main.webp",
   generationError: "",
   requestId: "",
   generationRunning: false,
   avatarRunning: false,
+  currentJob: null,
+  queueMessage: "正在连接免费 GPU…",
+  queuePosition: null,
+  queueEta: null,
   progress: 0,
   avatarProgress: 0,
   gender: "female",
@@ -31,6 +42,7 @@ const state = {
   bodyData: { height: "165", weight: "50", shoulder: "38", chest: "82", waist: "64", hip: "88" },
   favorite: false,
   wardrobeFilter: "全部",
+  wardrobeSection: "tryons",
   userName: "我的账号",
   stylePrefs: ["简约", "通勤"],
   records: [],
@@ -54,6 +66,7 @@ const screenTitles = {
   compare: "对比与细节",
   saved: "保存与整理",
   wardrobe: "我的衣橱",
+  stylePrefs: "风格偏好",
   profile: "我的",
   settings: "设置与账号管理"
 };
@@ -121,7 +134,7 @@ function render() {
   renderHeader();
   renderBottomNav();
   const content = $("#appContent");
-  content.className = "app-content" + (mainScreens.includes(state.screen) ? " has-nav" : "");
+  content.className = "app-content" + (mainScreens.includes(state.screen) ? " has-nav" : "") + (state.screen === "welcome" ? " welcome-scroll" : "");
   const pages = {
     welcome: welcomePage,
     home: homePage,
@@ -140,6 +153,7 @@ function render() {
     compare: comparePage,
     saved: savedPage,
     wardrobe: wardrobePage,
+    stylePrefs: stylePrefsPage,
     profile: profilePage,
     settings: settingsPage
   };
@@ -209,14 +223,19 @@ function uploadPage() {
 }
 
 function recognitionPage() {
-  return `<div class="recognition-visual">
-    <img src="${state.productSrc}" alt="待识别的商品图片">
-    <div class="crop-box"><i class="crop-handle tl"></i><i class="crop-handle tr"></i><i class="crop-handle bl"></i><i class="crop-handle br"></i></div>
+  return `<div class="crop-instruction"><b>拖动图片调整位置</b><span>双指缩放，或使用下方滑杆</span></div>
+  <div class="recognition-visual crop-editor-stage" data-crop-stage>
+    <img id="cropImage" src="${state.productOriginalSrc || state.productSrc}" alt="待裁剪的商品图片" draggable="false" style="transform:translate3d(${state.cropX}px,${state.cropY}px,0) scale(${state.cropZoom})">
+    <div class="crop-box" aria-hidden="true"><i class="crop-handle tl"></i><i class="crop-handle tr"></i><i class="crop-handle bl"></i><i class="crop-handle br"></i></div>
+  </div>
+  <div class="crop-controls">
+    <span>−</span><input id="cropZoom" type="range" min="1" max="3" step="0.02" value="${state.cropZoom}" aria-label="裁剪缩放"><span>＋</span>
+    <button class="chip outline" data-action="recrop">重置</button>
   </div>
   <div class="recognition-card">
-    <div class="confidence"><b>✧ 识别结果</b><span>识别准确度 98%</span></div>
+    <div class="confidence"><b>✧ 商品区域确认</b><span>${state.cropApplied ? "已裁剪" : "待确认"}</span></div>
     <div class="result-item"><img src="${state.productSrc}" alt="识别出的商品"><div><h4>${state.productName}</h4><div class="chips"><button class="chip">${garmentLabels[state.garmentType]}</button><button class="chip">夹克</button><button class="chip outline" data-action="edit-recognition">修改</button></div></div></div>
-    <div class="button-row"><button class="ghost-btn" data-action="recrop">⛶ 重新裁剪</button><button class="primary-btn" data-action="recognition-next">继续下一步 ›</button></div>
+    <div class="button-row"><button class="ghost-btn" data-action="person-reselect-product">重新选择</button><button class="primary-btn" data-action="recognition-next">使用此裁剪 ›</button></div>
   </div>`;
 }
 
@@ -277,37 +296,53 @@ function shapeOption(key, label) {
 
 function avatarGeneratingPage() {
   return `<div class="avatar-generation">
-    <div class="scan-frame photo-scan">${state.personSrc ? `<img src="${state.personSrc}" alt="正在建立的个人形象">` : `<div class="scan-silhouette">♙</div>`}<i></i><span></span></div>
+    <div class="scan-frame photo-scan">${state.personOriginalSrc || state.personSrc ? `<img src="${state.personOriginalSrc || state.personSrc}" alt="正在建立的个人形象">` : `<div class="scan-silhouette">♙</div>`}<i></i><span></span></div>
     <span class="micro-label">AI BODY PROFILE</span>
     <h2>正在建立你的<br>个人数字形象</h2>
-    <p>保存人脸与全身特征，准备后续开源 AI 真实试穿</p>
+    <p id="avatarStatus">AI 正在提取人物并生成白底数字形象，请保持页面打开</p>
     <div class="progress-wrap"><div class="progress-track"><div id="avatarProgressBar" class="progress-bar" style="width:${state.avatarProgress}%"></div></div><span id="avatarProgressNum" class="progress-num">${state.avatarProgress}%</span></div>
     <div class="generation-tags"><span>照片优化</span><span>数据建档</span><span>形象确认</span></div>
     <div class="info-strip"><span>✦</span><span>数字形象用于穿搭预览，不代表精确的人体测量或尺码建议。</span></div>
   </div>`;
 }
 
-function beginAvatarGeneration() {
+async function beginAvatarGeneration() {
   state.avatarRunning = true;
   state.avatarProgress = 6;
   let step = 0;
   const timer = setInterval(() => {
     if (state.screen !== "avatarGenerating") { state.avatarRunning = false; return clearInterval(timer); }
     step += 1;
-    state.avatarProgress = Math.min(100, Math.round(8 + step * 6.8 + Math.sin(step) * 2));
+    state.avatarProgress = Math.min(86, Math.round(8 + step * 2.8 + Math.sin(step) * 2));
     const bar = $("#avatarProgressBar");
     const num = $("#avatarProgressNum");
     if (bar) bar.style.width = `${state.avatarProgress}%`;
     if (num) num.textContent = `${state.avatarProgress}%`;
-    if (state.avatarProgress >= 100) {
-      clearInterval(timer);
-      state.profileReady = true;
-      saveProfile().finally(() => {
-        state.avatarRunning = false;
-        setTimeout(() => { if (state.screen === "avatarGenerating") go("avatarResult", { replace: true }); }, 260);
-      });
-    }
-  }, 190);
+  }, 420);
+  try {
+    state.personSrc = await createWhiteBackgroundAvatar(state.personOriginalSrc || state.personSrc);
+    state.avatarProgress = 100;
+    const bar = $("#avatarProgressBar");
+    const num = $("#avatarProgressNum");
+    if (bar) bar.style.width = "100%";
+    if (num) num.textContent = "100%";
+    state.profileReady = true;
+    await saveProfile();
+    await delay(300);
+    if (state.screen === "avatarGenerating") go("avatarResult", { replace: true });
+  } catch (error) {
+    const status = $("#avatarStatus");
+    if (status) status.textContent = "AI 抠图服务繁忙，已先生成白底标准化形象；稍后可在“我的”中重新生成。";
+    state.personSrc = await createStudioFallback(state.personOriginalSrc || state.personSrc);
+    state.avatarProgress = 100;
+    state.profileReady = true;
+    await saveProfile();
+    await delay(900);
+    if (state.screen === "avatarGenerating") go("avatarResult", { replace: true });
+  } finally {
+    clearInterval(timer);
+    state.avatarRunning = false;
+  }
 }
 
 function avatarResultPage() {
@@ -376,16 +411,27 @@ function generatingPage() {
   return `<div class="generation">
     <div class="orbit"><div class="orbit-core">⌁</div></div>
     <h2>AI 正在生成试穿效果…</h2>
-    <p>ZeroGPU 正在分析服装结构、人物轮廓与面部特征</p>
+    <p id="queueStatus">${escapeHtml(state.queueMessage)}</p>
     <div class="progress-wrap"><div class="progress-track"><div id="progressBar" class="progress-bar" style="width:${state.progress}%"></div></div><span id="progressNum" class="progress-num">${state.progress}%</span></div>
-    <div class="generation-meta"><span>◷ 预计等待<b>20–60 秒</b></span><i></i><span>▱ 生成张数<b>1 张预览图</b></span></div>
-    <div class="tips-card"><h4>✧ 试穿小贴士</h4><p>✓ 清晰照片有助于保持人物特征</p><p>✓ 系统会尽量保留领口、袖口与面料细节</p><p>✓ 视觉预览不等同于真实尺码与合身效果</p></div>
+    <div class="generation-meta"><span>◷ 当前状态<b id="queueDetail">${state.queuePosition ? `排队第 ${state.queuePosition} 位` : "连接中"}</b></span><i></i><span>▱ 生成张数<b>1 张预览图</b></span></div>
+    <div class="tips-card"><h4>✧ 试穿小贴士</h4><p>✓ 清晰照片有助于保持人物特征</p><p>✓ 免费 GPU 高峰期会排队，页面会显示实时队列</p><p>✓ 视觉预览不等同于真实尺码与合身效果</p></div>
+    <button class="text-action cancel-generation" data-action="cancel-generation">取消本次生成</button>
   </div>`;
+}
+
+function updateGenerationStatus() {
+  const status = $("#queueStatus");
+  const detail = $("#queueDetail");
+  if (status) status.textContent = state.queueMessage;
+  if (detail) detail.textContent = state.queuePosition ? `排队第 ${state.queuePosition} 位${state.queueEta ? ` · 约 ${state.queueEta} 秒` : ""}` : "GPU 处理中";
 }
 
 async function beginGeneration() {
   state.generationRunning = true;
   state.progress = 4;
+  state.queueMessage = "正在连接免费 GPU…";
+  state.queuePosition = null;
+  state.queueEta = null;
   const timer = setInterval(() => {
     if (state.screen !== "generating") { clearInterval(timer); state.generationRunning = false; return; }
     state.progress = Math.min(88, state.progress + Math.max(1, Math.round((90 - state.progress) / 14)));
@@ -471,11 +517,41 @@ function savedPage() {
 }
 
 function wardrobePage() {
-  const cards = state.records;
-  return `<div class="tabs"><button class="tab-btn active">我的试穿</button><button class="tab-btn">我的单品</button><button class="tab-btn">搭配方案</button></div>
-  <div class="section-head"><h3>共 ${cards.length} 条试穿记录</h3><button data-action="manage">▣ 管理</button></div>
-  <div class="filter-row">${["全部","上衣","下装","连衣裙","外套"].map(x => `<button class="filter-pill ${state.wardrobeFilter===x?"active":""}" data-filter="${x}">${x}</button>`).join("")}</div>
-  ${cards.length ? `<div class="wardrobe-grid">${cards.map((item, i) => `<button class="wardrobe-card" data-record="${i}"><img src="${item.result}" alt="${escapeHtml(item.productName)}试穿记录"><span class="tag">${escapeHtml(item.typeLabel || "试穿")}</span><span class="heart">${item.favorite?"♥":"♡"}</span></button>`).join("")}</div>` : `<div class="empty-state"><span>▱</span><h3>还没有试穿记录</h3><p>完成一次 AI 试穿并保存后，会出现在这里。</p><button class="primary-btn" data-action="start-flow">开始第一次试穿</button></div>`}`;
+  const tabs = [["tryons","我的试穿"],["items","我的单品"],["outfits","搭配方案"]];
+  const tabBar = `<div class="tabs">${tabs.map(([key,label])=>`<button class="tab-btn ${state.wardrobeSection===key?"active":""}" data-wardrobe-tab="${key}">${label}</button>`).join("")}</div>`;
+  if (state.wardrobeSection === "items") {
+    const items = state.records.length ? state.records : [{product:state.productSrc,productName:state.productName,typeLabel:garmentLabels[state.garmentType]}];
+    return `${tabBar}<div class="section-head"><h3>我的单品</h3><button data-action="start-flow">＋ 添加单品</button></div>
+    <div class="wardrobe-grid">${items.map((item,i)=>`<button class="wardrobe-card item-card" data-item-record="${i}"><img src="${item.product || state.productSrc}" alt="${escapeHtml(item.productName || "服装单品")}"><span class="tag">${escapeHtml(item.typeLabel || "单品")}</span><span class="card-caption">${escapeHtml(item.productName || "已上传单品")}</span></button>`).join("")}</div>`;
+  }
+  if (state.wardrobeSection === "outfits") {
+    return `${tabBar}<div class="section-head"><h3>搭配方案</h3><button data-action="smart-style">智能生成 ›</button></div>
+    <div class="outfit-list">
+      ${outfitCard("assets/inspire-urban-v2.webp","都市通勤","利落剪裁 · 中性色层次","简约 · 通勤")}
+      ${outfitCard("assets/inspire-soft-v2.webp","奶油柔光","浅色叠穿 · 温柔质感","法式 · 简约")}
+      ${outfitCard("assets/inspire-cool-v2.webp","先锋极简","黑灰对比 · 清冷轮廓","轻酷 · 中性")}
+    </div>`;
+  }
+  const cards = state.wardrobeFilter === "全部" ? state.records : state.records.filter(item => item.typeLabel === state.wardrobeFilter || (state.wardrobeFilter === "连衣裙" && item.typeLabel === "连体服"));
+  return `${tabBar}<div class="section-head"><h3>共 ${cards.length} 条试穿记录</h3><button data-action="manage">▣ 管理</button></div>
+  <div class="filter-row">${["全部","上衣","下装","连衣裙"].map(x => `<button class="filter-pill ${state.wardrobeFilter===x?"active":""}" data-filter="${x}">${x}</button>`).join("")}</div>
+  ${cards.length ? `<div class="wardrobe-grid">${cards.map((item, i) => `<button class="wardrobe-card" data-record-id="${item.id}"><img src="${item.result}" alt="${escapeHtml(item.productName)}试穿记录"><span class="tag">${escapeHtml(item.typeLabel || "试穿")}</span><span class="heart">${item.favorite?"♥":"♡"}</span></button>`).join("")}</div>` : `<div class="empty-state"><span>▱</span><h3>还没有试穿记录</h3><p>完成一次 AI 试穿并保存后，会出现在这里。</p><button class="primary-btn" data-action="start-flow">开始第一次试穿</button></div>`}`;
+}
+
+function outfitCard(src, title, desc, tags) {
+  return `<button class="outfit-card" data-look="${src.includes("urban")?"look-urban":src.includes("soft")?"look-soft":"look-cool"}"><img src="${src}" alt="${title}"><span><b>${title}</b><small>${desc}</small><em>${tags}</em></span><i>›</i></button>`;
+}
+
+function stylePrefsPage() {
+  const styles = [
+    ["简约","干净线条与低饱和配色","MINIMAL"], ["通勤","利落剪裁与日常实穿","COMMUTE"],
+    ["复古","经典廓形与温暖色调","RETRO"], ["中性","克制轮廓与松弛比例","UNISEX"],
+    ["运动","轻量面料与活力层次","SPORT"], ["甜美","柔和细节与轻盈色彩","SWEET"],
+    ["轻酷","深色对比与先锋配饰","COOL"], ["法式","自然优雅与松弛质感","FRENCH"]
+  ];
+  return `<div class="page-intro"><span class="micro-label">PERSONAL STYLE</span><h2>选择你的<br>日常穿搭偏好</h2><p>可选择 1–4 项，用于首页灵感与搭配方案推荐。</p></div>
+  <div class="style-choice-grid">${styles.map(([name,desc,en])=>`<button class="style-choice ${state.stylePrefs.includes(name)?"active":""}" data-style-choice="${name}"><span>${state.stylePrefs.includes(name)?"✓":"＋"}</span><small>${en}</small><b>${name}</b><p>${desc}</p></button>`).join("")}</div>
+  <div class="sticky-actions"><button class="primary-btn full" data-action="save-style-prefs">保存风格偏好（${state.stylePrefs.length}/4）</button></div>`;
 }
 
 function profilePage() {
@@ -517,10 +593,16 @@ function bindInputs() {
       try {
         const dataUrl = await processImageFile(file);
         if (input.dataset.file === "product") {
+          state.productOriginalSrc = dataUrl;
           state.productSrc = dataUrl;
+          state.cropZoom = 1;
+          state.cropX = 0;
+          state.cropY = 0;
+          state.cropApplied = false;
           state.productName = file.name.replace(/\.[^.]+$/, "").slice(0, 12) || "上传的服装";
           go("recognition");
         } else {
+          state.personOriginalSrc = dataUrl;
           state.personSrc = dataUrl;
           state.usingDemo = false;
           state.profileReady = false;
@@ -533,6 +615,37 @@ function bindInputs() {
   });
   document.querySelectorAll("input[data-body-field]").forEach(input => {
     input.addEventListener("input", () => { state.bodyData[input.dataset.bodyField] = input.value; });
+  });
+  const cropStage = $("[data-crop-stage]");
+  const cropImage = $("#cropImage");
+  const cropZoom = $("#cropZoom");
+  if (cropStage && cropImage) {
+    let dragging = false;
+    let startX = 0;
+    let startY = 0;
+    let originX = state.cropX;
+    let originY = state.cropY;
+    cropStage.addEventListener("pointerdown", event => {
+      dragging = true;
+      startX = event.clientX;
+      startY = event.clientY;
+      originX = state.cropX;
+      originY = state.cropY;
+      cropStage.setPointerCapture?.(event.pointerId);
+    });
+    cropStage.addEventListener("pointermove", event => {
+      if (!dragging) return;
+      state.cropX = originX + event.clientX - startX;
+      state.cropY = originY + event.clientY - startY;
+      cropImage.style.transform = `translate3d(${state.cropX}px,${state.cropY}px,0) scale(${state.cropZoom})`;
+    });
+    const stop = () => { dragging = false; };
+    cropStage.addEventListener("pointerup", stop);
+    cropStage.addEventListener("pointercancel", stop);
+  }
+  cropZoom?.addEventListener("input", () => {
+    state.cropZoom = Number(cropZoom.value);
+    if (cropImage) cropImage.style.transform = `translate3d(${state.cropX}px,${state.cropY}px,0) scale(${state.cropZoom})`;
   });
 }
 
@@ -571,17 +684,108 @@ function processImageFile(file) {
   });
 }
 
-let gradioClientPromise;
+let gradioModulePromise;
+const gradioClients = new Map();
 
-async function getGradioClient() {
-  if (!gradioClientPromise) {
-    gradioClientPromise = import("https://cdn.jsdelivr.net/npm/@gradio/client@2.7.0/dist/index.min.js")
-      .then(async ({ Client, handle_file }) => ({
-        client: await Client.connect(CONFIG.spaceId || CONFIG.apiBase),
-        handleFile: handle_file
-      }));
+async function getGradioClient(spaceId = CONFIG.spaceId || CONFIG.apiBase) {
+  if (!gradioModulePromise) {
+    gradioModulePromise = import("https://cdn.jsdelivr.net/npm/@gradio/client@2.7.0/dist/index.min.js");
   }
-  return gradioClientPromise;
+  const { Client, handle_file } = await gradioModulePromise;
+  if (!gradioClients.has(spaceId)) {
+    gradioClients.set(spaceId, Client.connect(spaceId, { events: ["status", "data"] }));
+  }
+  return { client: await gradioClients.get(spaceId), handleFile: handle_file };
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("无法处理这张图片"));
+    image.src = src;
+  });
+}
+
+async function applyProductCrop() {
+  const source = state.productOriginalSrc || state.productSrc;
+  const image = await loadImage(source);
+  const canvas = document.createElement("canvas");
+  canvas.width = 900;
+  canvas.height = 1200;
+  const ctx = canvas.getContext("2d", { alpha: false });
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const baseScale = Math.max(canvas.width / image.naturalWidth, canvas.height / image.naturalHeight);
+  const scale = baseScale * state.cropZoom;
+  const stageWidth = $("[data-crop-stage]")?.clientWidth || 390;
+  const offsetScale = canvas.width / stageWidth;
+  const width = image.naturalWidth * scale;
+  const height = image.naturalHeight * scale;
+  ctx.drawImage(image, (canvas.width - width) / 2 + state.cropX * offsetScale, (canvas.height - height) / 2 + state.cropY * offsetScale, width, height);
+  state.productSrc = canvas.toDataURL("image/jpeg", 0.9);
+  state.cropApplied = true;
+}
+
+async function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function extractRemoteFile(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = extractRemoteFile(item);
+      if (found) return found;
+    }
+  }
+  return value.url || value.path || value.image?.url || value.image?.path || "";
+}
+
+async function compositeOnWhite(src) {
+  let usableSrc = src;
+  let objectUrl = "";
+  if (/^https?:/i.test(src)) {
+    const response = await fetch(src);
+    if (!response.ok) throw new Error("AVATAR_FILE_FETCH_FAILED");
+    objectUrl = URL.createObjectURL(await response.blob());
+    usableSrc = objectUrl;
+  }
+  const image = await loadImage(usableSrc);
+  const canvas = document.createElement("canvas");
+  canvas.width = 900;
+  canvas.height = 1200;
+  const ctx = canvas.getContext("2d", { alpha: false });
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const scale = Math.min(canvas.width * 0.92 / image.naturalWidth, canvas.height * 0.94 / image.naturalHeight);
+  const width = image.naturalWidth * scale;
+  const height = image.naturalHeight * scale;
+  ctx.drawImage(image, (canvas.width - width) / 2, canvas.height - height - 22, width, height);
+  if (objectUrl) URL.revokeObjectURL(objectUrl);
+  return canvas.toDataURL("image/jpeg", 0.92);
+}
+
+async function createWhiteBackgroundAvatar(source) {
+  if (!source) throw new Error("MISSING_PERSON_IMAGE");
+  const { client, handleFile } = await getGradioClient(AVATAR_SPACE_ID);
+  const blob = await fetch(source).then(response => response.blob());
+  const task = client.predict("/image", [handleFile(blob)]);
+  const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("AVATAR_TIMEOUT")), 120000));
+  const result = await Promise.race([task, timeout]);
+  const file = extractRemoteFile(result?.data?.[1]) || extractRemoteFile(result?.data?.[0]);
+  if (!file) throw new Error("AVATAR_EMPTY_RESULT");
+  return compositeOnWhite(file);
+}
+
+async function createStudioFallback(source) {
+  return compositeOnWhite(source);
 }
 
 async function callTryOnApi() {
@@ -597,7 +801,7 @@ async function callTryOnApi() {
         const error = new Error("HF_TIMEOUT");
         error.name = "AbortError";
         reject(error);
-      }, 300000);
+      }, 240000);
     });
     const task = (async () => {
       const { client, handleFile } = await getGradioClient();
@@ -605,17 +809,31 @@ async function callTryOnApi() {
         fetch(state.personSrc).then(response => response.blob()),
         fetch(state.productSrc).then(response => response.blob())
       ]);
-      const result = await client.predict("/tryon", {
+      const job = client.submit("/tryon", {
         person_image: handleFile(personBlob),
         garment_image: handleFile(garmentBlob),
         category,
         garment_is_worn: false,
         request_hash: requestId,
-        steps: 24,
+        steps: 16,
         scale: 2.5,
         seed: 42
       });
-      const payload = Array.isArray(result?.data) ? result.data[0] : result?.data;
+      state.currentJob = job;
+      let payload = null;
+      for await (const message of job) {
+        if (message.type === "status") {
+          const stage = message.stage || message.status;
+          state.queuePosition = Number.isFinite(message.position) ? message.position + 1 : null;
+          state.queueEta = Number.isFinite(message.eta) ? Math.max(0, Math.round(message.eta)) : null;
+          state.queueMessage = stage === "pending"
+            ? `免费 GPU 排队中${state.queuePosition ? ` · 前方 ${Math.max(0, state.queuePosition - 1)} 人` : ""}${state.queueEta ? ` · 约 ${state.queueEta} 秒` : ""}`
+            : stage === "generating" ? "GPU 已开始生成，请保持页面打开…" : "正在接收生成结果…";
+          updateGenerationStatus();
+          if (stage === "error") throw new Error(message.message || "HF_GENERATION_FAILED");
+        }
+        if (message.type === "data") payload = Array.isArray(message.data) ? message.data[0] : message.data;
+      }
       if (!payload?.ok || !payload?.image) {
         const error = new Error(payload?.message || payload?.error_code || "HF_GENERATION_FAILED");
         error.code = payload?.error_code;
@@ -624,7 +842,8 @@ async function callTryOnApi() {
       }
       return { image: payload.image, requestId: payload.request_hash || requestId };
     })();
-    return Promise.race([task, timeout]);
+    try { return await Promise.race([task, timeout]); }
+    finally { state.currentJob = null; }
   }
 
   const controller = new AbortController();
@@ -669,7 +888,7 @@ async function callTryOnApi() {
 
 function friendlyApiError(error) {
   if (error?.requestId) state.requestId = error.requestId;
-  if (error?.name === "AbortError") return "免费 GPU 排队或生成超过 5 分钟，请稍后重新尝试。";
+  if (error?.name === "AbortError") return "免费 GPU 排队或生成超过 4 分钟，本次已自动停止。建议避开高峰期，或稍后重新尝试。";
   const text = String(error?.message || error || "");
   if (text.includes("AI_BACKEND_NOT_CONFIGURED")) return "免费 AI 空间尚未绑定。完成 Hugging Face Space 部署后即可真实生成。";
   if (text.includes("MISSING_IMAGES")) return "缺少人物照或商品图，请返回重新上传。";
@@ -719,10 +938,11 @@ async function dbDelete(key) {
 }
 
 async function saveProfile() {
-  const profile = { bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender, userName: state.userName, updatedAt: Date.now() };
+  const profile = { bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender, userName: state.userName, avatarVersion: 2, updatedAt: Date.now() };
   if (state.usingDemo) { state.profileReady = true; return; }
   localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
   if (state.personSrc) await dbSet("profileImage", state.personSrc);
+  if (state.personOriginalSrc) await dbSet("profileOriginalImage", state.personOriginalSrc);
   state.profileReady = Boolean(state.personSrc);
 }
 
@@ -751,7 +971,7 @@ async function loadAppData() {
   try {
     const profile = JSON.parse(localStorage.getItem(PROFILE_KEY) || "null");
     const prefs = JSON.parse(localStorage.getItem(PREFS_KEY) || "null");
-    const [profileImage, records] = await Promise.all([dbGet("profileImage"), dbGet("records")]);
+    const [profileImage, profileOriginalImage, records] = await Promise.all([dbGet("profileImage"), dbGet("profileOriginalImage"), dbGet("records")]);
     if (profile) {
       state.bodyData = { ...state.bodyData, ...(profile.bodyData || {}) };
       state.bodyShape = profile.bodyShape || state.bodyShape;
@@ -763,7 +983,8 @@ async function loadAppData() {
       state.consent = prefs.consent !== false;
     }
     state.personSrc = profileImage || "";
-    state.profileReady = Boolean(profile && profileImage);
+    state.personOriginalSrc = profileOriginalImage || profileImage || "";
+    state.profileReady = Boolean(profile && profileImage && profile.avatarVersion === 2);
     state.records = Array.isArray(records) ? records : [];
   } catch (error) {
     console.warn("Local profile could not be loaded", error);
@@ -775,9 +996,10 @@ async function loadAppData() {
 async function deleteAllLocalData() {
   localStorage.removeItem(PROFILE_KEY);
   localStorage.removeItem(PREFS_KEY);
-  await Promise.all([dbDelete("profileImage"), dbDelete("records")]);
+  await Promise.all([dbDelete("profileImage"), dbDelete("profileOriginalImage"), dbDelete("records")]);
   state.profileReady = false;
   state.personSrc = "";
+  state.personOriginalSrc = "";
   state.records = [];
   state.stylePrefs = ["简约", "通勤"];
 }
@@ -811,6 +1033,17 @@ document.addEventListener("click", event => {
   if (shape) { state.bodyShape = shape.dataset.shape; render(); return; }
   const filter = event.target.closest("[data-filter]");
   if (filter) { state.wardrobeFilter = filter.dataset.filter; render(); return; }
+  const wardrobeTab = event.target.closest("[data-wardrobe-tab]");
+  if (wardrobeTab) { state.wardrobeSection = wardrobeTab.dataset.wardrobeTab; render(); return; }
+  const styleChoice = event.target.closest("[data-style-choice]");
+  if (styleChoice) {
+    const value = styleChoice.dataset.styleChoice;
+    if (state.stylePrefs.includes(value)) state.stylePrefs = state.stylePrefs.filter(x => x !== value);
+    else if (state.stylePrefs.length < 4) state.stylePrefs = [...state.stylePrefs, value];
+    else return toast("最多选择 4 个风格");
+    render();
+    return;
+  }
   const look = event.target.closest("[data-look]");
   if (look) {
     const src = {"look-urban":"assets/inspire-urban-v2.webp","look-soft":"assets/inspire-soft-v2.webp","look-cool":"assets/inspire-cool-v2.webp"}[look.dataset.look];
@@ -818,8 +1051,8 @@ document.addEventListener("click", event => {
     go("result");
     return;
   }
-  const record = event.target.closest("[data-record]");
-  if (record) { const item = state.records[Number(record.dataset.record)]; if (item) { state.resultSrc=item.result; state.productSrc=item.product || state.productSrc; state.productName=item.productName || state.productName; state.favorite=Boolean(item.favorite); state.requestId=item.requestId || ""; go("result"); } return; }
+  const record = event.target.closest("[data-record-id]");
+  if (record) { const item = state.records.find(x => x.id === record.dataset.recordId); if (item) { state.resultSrc=item.result; state.productSrc=item.product || state.productSrc; state.productName=item.productName || state.productName; state.favorite=Boolean(item.favorite); state.requestId=item.requestId || ""; go("result"); } return; }
   const trigger = event.target.closest("[data-action]");
   if (!trigger) return;
   const action = trigger.dataset.action;
@@ -828,11 +1061,12 @@ document.addEventListener("click", event => {
     back,
     "start-flow": () => { if (state.profileReady) go("upload"); else { state.onboarding=true; state.resumeTryOn=true; go("personUpload"); } },
     "open-wardrobe": () => go("wardrobe"),
-    "demo-product": () => { state.productSrc="assets/garment-clean.webp"; state.productName="短款翻领夹克"; go("recognition"); },
+    "demo-product": () => { state.productSrc="assets/garment-clean.webp"; state.productOriginalSrc=state.productSrc; state.cropZoom=1; state.cropX=0; state.cropY=0; state.cropApplied=false; state.productName="短款翻领夹克"; go("recognition"); },
     "history-product": () => openModal("历史商品", `<p>你的示例商品已保留。首版将支持按来源平台、类别和收藏状态筛选。</p><button class="option-row" data-action="demo-product"><span class="row-icon">♧</span><span><b>短款翻领夹克</b><small>上衣 · 示例商品</small></span><span class="chev">›</span></button>`),
-    "recrop": () => toast("已重置裁剪区域"),
+    "recrop": () => { state.cropZoom=1; state.cropX=0; state.cropY=0; state.cropApplied=false; render(); toast("已重置裁剪区域"); },
+    "person-reselect-product": () => go("upload"),
     "edit-recognition": () => go("category"),
-    "recognition-next": () => go("category"),
+    "recognition-next": async () => { try { await applyProductCrop(); go("category"); } catch (error) { toast("裁剪失败，请重新选择图片"); } },
     "category-next": () => { if (state.profileReady) go("confirm"); else { state.resumeTryOn=true; go("personUpload"); } },
     "generate-avatar": () => {
       if (!state.bodyData.height || !state.bodyData.weight) return toast("请先填写身高和体重");
@@ -845,7 +1079,7 @@ document.addEventListener("click", event => {
     "avatar-upload-photo": () => { state.resumeTryOn=false; go("personUpload"); },
     "favorite-avatar": () => toast("数字形象已收藏"),
     "measure-help": () => openModal("身体数据测量方法", `<p><b>肩宽：</b>左右肩峰之间的直线距离。</p><p><b>胸围：</b>胸部最丰满处水平一周。</p><p><b>腰围：</b>自然腰线最细处水平一周。</p><p><b>臀围：</b>臀部最丰满处水平一周。</p>`),
-    "demo-person": () => { state.personSrc="assets/person-clean.webp"; state.usingDemo=true; state.profileReady=false; go("photoGuide"); },
+    "demo-person": () => { state.personSrc="assets/person-clean.webp"; state.personOriginalSrc=state.personSrc; state.usingDemo=true; state.profileReady=false; go("photoGuide"); },
     "person-reselect": () => go("personUpload"),
     "photo-next": () => go("bodyData"),
     generate: () => { if (!state.consent) return openModal("需要图片处理授权", `<p>只有在你主动点击生成时，人物照和商品图才会发送至 AI 服务进行本次换装。请先在隐私设置中允许。</p>`, `<button class="primary-btn full" data-action="privacy">查看并授权</button>`); state.progress=0; state.generationError=""; go("generating"); },
@@ -860,13 +1094,14 @@ document.addEventListener("click", event => {
     settings: () => go("settings"),
     "body-profile": () => go("bodyData"),
     privacy: () => openModal("照片用途与隐私", `<p><b>本机保存：</b>个人全身照、身体数据和试穿记录保存在当前手机浏览器中。</p><p><b>生成处理：</b>点击“开始 AI 试穿”后，人物照和商品图会发送至第三方 Hugging Face 公共 ZeroGPU Space 进行临时推理，不上传到腾讯云 COS，也不会加入本应用的永久云端相册。请勿上传身份证件或其他敏感照片。</p><p><b>你的控制：</b>可在设置中删除照片、记录或全部本机个人数据。</p><button class="consent-row" data-action="toggle-consent"><span>${state.consent ? "✓" : ""}</span><b>允许在点击生成时发送图片至 AI 服务</b></button>`),
-    "style-pref": () => openModal("选择风格偏好", `<p>选择 1–4 个常用风格，会用于首页推荐与后续搭配。</p><div class="chips pref-chips" style="margin:12px 0 20px">${["简约","通勤","复古","中性","运动","甜美","轻酷","法式"].map(x=>`<button class="chip ${state.stylePrefs.includes(x)?"active":""}" data-action="toggle-pref" data-value="${x}">${x}</button>`).join("")}</div>`, `<button class="primary-btn full" data-action="save-prefs">保存偏好</button>`),
+    "style-pref": () => go("stylePrefs"),
     "toggle-pref": () => { const value=trigger.dataset.value; state.stylePrefs = state.stylePrefs.includes(value) ? state.stylePrefs.filter(x=>x!==value) : state.stylePrefs.length<4 ? [...state.stylePrefs,value] : state.stylePrefs; closeModal(); actions["style-pref"](); },
     "save-prefs": () => { savePreferences(); closeModal(); render(); toast("风格偏好已保存"); },
+    "save-style-prefs": () => { if (!state.stylePrefs.length) return toast("请至少选择 1 个风格"); savePreferences(); toast("风格偏好已保存"); back(); },
     "photo-archive": () => state.profileReady ? openModal("个人照片档案", `<div class="selected-photo"><img src="${state.personSrc}" alt="个人照片"><div><b>默认个人全身照</b><p>✓ 已保存在本机，可重复试穿</p></div></div><p>上传新的照片会替换当前默认形象；删除后再次试穿前需要重新建档。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="delete-photo">删除照片</button><button class="primary-btn" data-action="replace-photo">更换照片</button></div>`) : openModal("个人照片档案", `<div class="empty-state small"><span>▧</span><p>还没有个人全身照</p></div>`, `<button class="primary-btn full" data-action="replace-photo">上传并建立形象</button>`),
     "replace-photo": () => { closeModal(); state.resumeTryOn=false; go("personUpload"); },
     "delete-photo": () => openModal("删除个人照片？", `<p>删除后，现有试穿记录仍会保留，但再次生成前必须上传新的全身照。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="confirm-delete-photo">确认删除</button></div>`),
-    "confirm-delete-photo": async () => { await dbDelete("profileImage"); localStorage.removeItem(PROFILE_KEY); state.personSrc=""; state.profileReady=false; closeModal(); render(); toast("个人照片已删除"); },
+    "confirm-delete-photo": async () => { await Promise.all([dbDelete("profileImage"),dbDelete("profileOriginalImage")]); localStorage.removeItem(PROFILE_KEY); state.personSrc=""; state.personOriginalSrc=""; state.profileReady=false; closeModal(); render(); toast("个人照片已删除"); },
     more: () => openModal("更多操作", `<div class="option-list"><button class="option-row" data-action="privacy"><span class="row-icon">▣</span><span><b>隐私说明</b></span><span class="chev">›</span></button><button class="option-row" data-action="help"><span class="row-icon">?</span><span><b>使用帮助</b></span><span class="chev">›</span></button></div>`),
     help: () => openModal("使用帮助", `<p><b>首次使用：</b>上传正面清晰全身照 → 确认照片 → 填写身体数据 → 建立个人形象。</p><p><b>试穿：</b>上传商品正面平铺图 → 选择服装类型 → 确认人物形象 → 调用 Hugging Face ZeroGPU 真实生成。</p><p><b>效果建议：</b>人物照建议 3:4、正面无遮挡；商品图只保留一件上衣、下装或连衣裙。</p>`),
     message: () => openModal("消息通知", `<div class="empty-state small"><span>♧</span><h3>暂无新消息</h3><p>生成完成、服务状态与隐私更新会显示在这里。</p></div>`),
@@ -881,6 +1116,7 @@ document.addEventListener("click", event => {
     "delete-all-data": () => openModal("删除全部个人数据？", `<p>这会删除本机保存的个人照片、身体数据、风格偏好和全部试穿记录，无法撤销。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="confirm-delete-all">确认全部删除</button></div>`),
     "confirm-delete-all": async () => { await deleteAllLocalData(); closeModal(); state.screen="welcome"; state.history=[]; render(); toast("本机个人数据已全部删除"); },
     "retry-generate": () => { state.generationError=""; state.progress=0; go("generating", {replace:true}); },
+    "cancel-generation": () => { state.currentJob?.cancel?.(); state.currentJob=null; state.generationRunning=false; go("confirm", {replace:true}); toast("已取消本次生成"); },
     "back-to-confirm": () => go("confirm", {replace:true}),
     "dismiss-install": () => {
       sessionStorage.setItem("tryon-install-hint", "dismissed");
@@ -902,4 +1138,5 @@ function setupPwa() {
 
 setupPwa();
 loadAppData().then(render);
+
 
