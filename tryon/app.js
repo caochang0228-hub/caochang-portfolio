@@ -6,6 +6,7 @@ const PREFS_KEY = "tryon-prefs-v2";
 const DB_NAME = "tryon-local-v2";
 const DB_STORE = "assets";
 const AVATAR_API_BASE = "https://briaai-bria-rmbg-2-0.hf.space";
+const AVATAR_CPU_FALLBACK = "https://namelessai-rembg.hf.space";
 
 const state = {
   screen: "welcome",
@@ -38,6 +39,7 @@ const state = {
   generationRunning: false,
   avatarRunning: false,
   avatarError: "",
+  avatarErrorRaw: "",
   currentJob: null,
   queueMessage: "正在连接免费 GPU…",
   queuePosition: null,
@@ -319,6 +321,8 @@ function avatarGeneratingPage() {
 
 async function beginAvatarGeneration() {
   state.avatarRunning = true;
+  state.avatarError = "";
+  state.avatarErrorRaw = "";
   state.avatarProgress = 6;
   let step = 0;
   const timer = setInterval(() => {
@@ -343,6 +347,7 @@ async function beginAvatarGeneration() {
     if (state.screen === "avatarGenerating") go("avatarResult", { replace: true });
   } catch (error) {
     state.avatarError = friendlyAvatarError(error);
+    state.avatarErrorRaw = String(error?.message || error || "UNKNOWN_AVATAR_ERROR");
     state.profileReady = false;
     if (state.screen === "avatarGenerating") go("avatarError", { replace: true });
   } finally {
@@ -352,7 +357,7 @@ async function beginAvatarGeneration() {
 }
 
 function avatarErrorPage() {
-  return `<div class="generation error-state"><div class="error-orbit">!</div><span class="micro-label">AVATAR GENERATION STOPPED</span><h2>白底数字形象<br>还没有生成成功</h2><p>${escapeHtml(state.avatarError || "AI 服务暂时不可用，请稍后重试。")}</p><div class="tips-card"><h4>本次不会保存原图冒充数字形象</h4><p>✓ 请保持当前页面打开</p><p>✓ 建议切换稳定 Wi-Fi 后重试</p><p>✓ 照片应完整包含头部到脚部</p></div><div class="button-row"><button class="ghost-btn" data-action="person-reselect">更换照片</button><button class="primary-btn" data-action="retry-avatar">重新生成</button></div></div>`;
+  return `<div class="generation error-state"><div class="error-orbit">!</div><span class="micro-label">AVATAR GENERATION STOPPED</span><h2>白底数字形象<br>还没有生成成功</h2><p>${escapeHtml(state.avatarError || "AI 服务暂时不可用，请稍后重试。")}</p><div class="tips-card"><h4>本次不会保存原图冒充数字形象</h4><p>✓ 已依次尝试主通道与备用 CPU 通道</p><p>✓ 请保持当前页面打开并使用稳定 Wi-Fi</p><p>✓ 照片应完整包含头部到脚部</p>${state.avatarErrorRaw ? `<details><summary>查看错误代码</summary><code>${escapeHtml(state.avatarErrorRaw)}</code></details>` : ""}</div><div class="button-row"><button class="ghost-btn" data-action="person-reselect">更换照片</button><button class="primary-btn" data-action="retry-avatar">重新生成</button></div></div>`;
 }
 
 function avatarResultPage() {
@@ -605,7 +610,7 @@ function settingsPage() {
   <div class="settings-section"><h3>隐私与安全</h3><div class="menu-list"><button class="menu-item" data-action="privacy"><span>▣</span><b>隐私与授权</b><small>相机、相册、数据权限 ›</small></button><button class="menu-item" data-action="account"><span>◉</span><b>账号与安全</b><small>手机号、密码、登录管理 ›</small></button></div></div>
   <div class="settings-section"><h3>服务与帮助</h3><div class="menu-list"><button class="menu-item" data-action="help"><span>?</span><b>客服帮助</b><small>在线咨询 · 常见问题 ›</small></button></div></div>
   <button class="danger-btn" data-action="delete-all-data">删除本机全部个人数据</button>
-  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v1.5 单人校验与人脸保护版</p>`;
+  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v1.6 双通道形象生成版</p>`;
 }
 
 function bindInputs() {
@@ -951,16 +956,34 @@ async function compositeOnWhite(src) {
 async function createWhiteBackgroundAvatar(source) {
   if (!source) throw new Error("MISSING_PERSON_IMAGE");
   const blob = await fetch(source).then(response => response.blob());
-  const uploaded = await uploadToGradio(AVATAR_API_BASE, blob, "person.jpg");
-  const result = await callGradioDirect(AVATAR_API_BASE, "image", [uploaded], { timeout: 150000 });
-  let file = extractRemoteFile(result?.[1]) || extractRemoteFile(result?.[0]);
-  if (!file) throw new Error("AVATAR_EMPTY_RESULT");
-  if (!/^https?:|^data:/i.test(file)) file = `${AVATAR_API_BASE}/gradio_api/file=${encodeURIComponent(file)}`;
-  return compositeOnWhite(file);
+  const backends = [
+    { base: AVATAR_API_BASE, endpoint: "image", data: uploaded => [uploaded], pick: result => result?.[1] || result?.[0], timeout: 90000, label: "主通道" },
+    { base: AVATAR_CPU_FALLBACK, endpoint: "update_ui", data: uploaded => [uploaded, "PNG"], pick: result => result?.[1] || result?.[0], timeout: 180000, label: "备用 CPU 通道" }
+  ];
+  let lastError;
+  for (const backend of backends) {
+    try {
+      const status = $("#avatarStatus");
+      if (status) status.textContent = `${backend.label}正在提取人物，请保持页面打开…`;
+      const uploaded = await uploadToGradio(backend.base, blob, "person.jpg");
+      const result = await callGradioDirect(backend.base, backend.endpoint, backend.data(uploaded), { timeout: backend.timeout });
+      let file = extractRemoteFile(backend.pick(result));
+      if (!file) throw new Error("AVATAR_EMPTY_RESULT");
+      if (!/^https?:|^data:/i.test(file)) file = `${backend.base}/gradio_api/file=${encodeURIComponent(file)}`;
+      return await compositeOnWhite(file);
+    } catch (error) {
+      lastError = error;
+      const status = $("#avatarStatus");
+      if (status) status.textContent = `${backend.label}暂不可用，正在切换备用服务…`;
+      await delay(300);
+    }
+  }
+  throw lastError || new Error("AVATAR_ALL_BACKENDS_FAILED");
 }
 
 function friendlyAvatarError(error) {
   const text = String(error?.message || error || "");
+  if (/AVATAR_ALL_BACKENDS_FAILED/i.test(text)) return "主通道和备用通道都暂时不可用，请稍后重新生成。";
   if (error?.name === "AbortError" || /AVATAR_TIMEOUT/i.test(text)) return "免费 AI 抠图服务等待超时，请稍后重新生成。";
   if (/HF_UPLOAD|Failed to fetch|network|fetch/i.test(text)) return "手机网络暂时无法连接白底形象服务，请切换 Wi-Fi 后重试。";
   if (/quota|ZeroGPU|429|capacity|busy/i.test(text)) return "当前免费 GPU 额度或容量不足，请稍后重试。";
@@ -1295,7 +1318,7 @@ document.addEventListener("click", event => {
     "delete-all-data": () => openModal("删除全部个人数据？", `<p>这会删除本机保存的个人照片、身体数据、风格偏好和全部试穿记录，无法撤销。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="confirm-delete-all">确认全部删除</button></div>`),
     "confirm-delete-all": async () => { await deleteAllLocalData(); closeModal(); state.screen="welcome"; state.history=[]; render(); toast("本机个人数据已全部删除"); },
     "retry-generate": () => { state.generationError=""; state.progress=0; go("generating", {replace:true}); },
-    "retry-avatar": () => { state.avatarError=""; state.avatarProgress=0; go("avatarGenerating", {replace:true}); },
+    "retry-avatar": () => { state.avatarError=""; state.avatarErrorRaw=""; state.avatarProgress=0; go("avatarGenerating", {replace:true}); },
     "cancel-generation": () => { state.currentJob?.cancel?.(); state.currentJob=null; state.generationRunning=false; go("confirm", {replace:true}); toast("已取消本次生成"); },
     "back-to-confirm": () => go("confirm", {replace:true}),
     "dismiss-install": () => {
