@@ -1,0 +1,10 @@
+{
+  "client_id": "https://u2zqev.com.cn/.well-known/oauth-cimd",
+  "client_name": "TRY ON｜试一试",
+  "redirect_uris": [
+    "https://u2zqev.com.cn/tryon/"
+  ],
+  "token_endpoint_auth_method": "none",
+  "logo_uri": "https://u2zqev.com.cn/tryon/assets/icon-192.png",
+  "client_uri": "https://u2zqev.com.cn/tryon/"
+}
