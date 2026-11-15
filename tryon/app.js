@@ -26,6 +26,12 @@ const state = {
   cropApplied: false,
   personSrc: "",
   personOriginalSrc: "",
+  personCropZoom: 1,
+  personCropX: 0,
+  personCropY: 0,
+  singlePersonConfirmed: false,
+  productCleaned: false,
+  productCleaning: false,
   resultSrc: "assets/result-main.webp",
   generationError: "",
   requestId: "",
@@ -60,6 +66,7 @@ const screenTitles = {
   avatarError: "形象生成失败",
   avatarResult: "个人形象确认",
   personUpload: "上传个人照片",
+  personCrop: "裁剪个人照片",
   photoGuide: "拍照指南与确认",
   confirm: "试穿设置确认",
   generating: "AI 试穿生成",
@@ -148,6 +155,7 @@ function render() {
     avatarError: avatarErrorPage,
     avatarResult: avatarResultPage,
     personUpload: personUploadPage,
+    personCrop: personCropPage,
     photoGuide: photoGuidePage,
     confirm: confirmPage,
     generating: generatingPage,
@@ -249,7 +257,7 @@ function categoryPage() {
     ${categoryCard("bottom", "♜", "下装")}
     ${categoryCard("dress", "♙", "连体服")}
   </div>
-  <div class="selected-product"><h3>已选择的商品</h3><div class="product-summary"><img src="${state.productSrc}" alt="${state.productName}"><div><h4>${state.productName}</h4><p>${garmentLabels[state.garmentType]}｜AI已识别</p></div><span class="chev">›</span></div></div>
+  <div class="selected-product"><h3>已选择的商品</h3><div class="product-summary"><img src="${state.productSrc}" alt="${state.productName}"><div><h4>${state.productName}</h4><p>${garmentLabels[state.garmentType]}｜${state.productCleaned ? "背景已净化" : "已完成裁剪"}</p></div><span class="chev">›</span></div></div>
   <div class="sticky-actions"><button class="primary-btn full" data-action="category-next">下一步</button></div>`;
 }
 
@@ -351,7 +359,7 @@ function avatarResultPage() {
   const shapeName = { slim: "纤细", balanced: "匀称", curvy: "曲线", athletic: "健体" }[state.bodyShape];
   return `<div class="avatar-result">
     <div class="avatar-stage"><img src="${state.personSrc}" alt="我的个人AI全身形象"><span>MY DIGITAL SELF</span><button data-action="favorite-avatar">♡</button></div>
-    <div class="avatar-result-copy"><span class="success-pill">✓ 个人形象已生成</span><h2>你好，这是你的<br>数字试穿形象</h2><p>已根据基础数据生成，可作为后续试穿的默认个人全身照。</p></div>
+    <div class="avatar-result-copy"><span class="success-pill">✓ 白底数字形象已生成</span><h2>你好，这是你的<br>数字试穿形象</h2><p>已完成单人裁剪与 AI 背景分离，可作为后续试穿的默认个人全身照。</p></div>
     <div class="avatar-data-row"><span><b>${state.bodyData.height}</b> cm<small>身高</small></span><span><b>${state.bodyData.weight}</b> kg<small>体重</small></span><span><b>${shapeName}</b><small>身形</small></span></div>
     <div class="button-row"><button class="ghost-btn" data-action="avatar-adjust">调整数据</button><button class="primary-btn fashion-btn" data-action="avatar-use">使用此形象 ›</button></div>
     <button class="text-action" data-action="avatar-upload-photo">更换真人全身照</button>
@@ -367,6 +375,18 @@ function personUploadPage() {
     <label class="option-row" for="cameraPerson"><input class="sr-only" id="cameraPerson" type="file" accept="image/*" capture="user" data-file="person"><span class="row-icon">◎</span><span><b>拍照</b><small>打开前置相机拍摄</small></span><span class="chev">›</span></label>
     <button class="option-row" data-action="privacy"><span class="row-icon">▣</span><span><b>照片用途与隐私说明</b><small>了解处理、保存与删除方式</small></span><span class="chev">›</span></button>
   </div>`;
+}
+
+function personCropPage() {
+  return `<div class="page-intro compact-intro"><span class="micro-label">SINGLE PERSON CROP</span><h2>只保留你本人</h2><p>拖动和缩放照片，让头部、身体和双脚进入引导框。请排除海报、屏幕或其他照片中的人脸。</p></div>
+  <div class="person-crop-stage" data-person-crop-stage>
+    <img id="personCropImage" src="${state.personOriginalSrc || state.personSrc}" alt="待裁剪的个人全身照" draggable="false" style="transform:translate3d(${state.personCropX}px,${state.personCropY}px,0) scale(${state.personCropZoom})">
+    <div class="body-guide" aria-hidden="true"><i class="head-guide"></i><i class="body-guide-line"></i><span>头部</span><em>双脚</em></div>
+    <div class="crop-warning">画面中只能出现你本人</div>
+  </div>
+  <div class="crop-controls person-controls"><span>−</span><input id="personCropZoom" type="range" min="1" max="4" step="0.02" value="${state.personCropZoom}" aria-label="人物裁剪缩放"><span>＋</span><button class="chip outline" data-action="reset-person-crop">重置</button></div>
+  <div class="identity-note warning-note"><b>照片要求</b><p>正面站立、双臂与身体分开、无遮挡、光线均匀。背景中的明星海报、电视画面和镜子人像都会导致识别错误。</p></div>
+  <div class="button-row"><button class="ghost-btn" data-action="person-reselect">重新选择</button><button class="primary-btn" data-action="apply-person-crop">确认单人裁剪 ›</button></div>`;
 }
 
 function photoGuidePage() {
@@ -385,7 +405,8 @@ function photoGuidePage() {
   </div>
   <div class="selected-photo"><img src="${state.personSrc}" alt="已选择的个人照片"><div><b>照片已确认</b><p>✓ 将用于保留身份特征</p></div></div>
   <div class="identity-note"><b>人脸一致性提示</b><p>请确保面部无遮挡、无重度美颜、光线均匀。换装服务会保留原图人物，但生成式模型仍可能轻微改变五官或发丝。</p></div>
-  <div class="button-row"><button class="ghost-btn" data-action="person-reselect">↻ 重新选择</button><button class="primary-btn" data-action="photo-next">确认照片并填写数据</button></div>`;
+  <button class="single-person-check ${state.singlePersonConfirmed ? "active" : ""}" data-action="toggle-single-person"><span>${state.singlePersonConfirmed ? "✓" : ""}</span><b>确认裁剪画面中只有我本人一张脸</b></button>
+  <div class="button-row"><button class="ghost-btn" data-action="back-to-person-crop">重新裁剪</button><button class="primary-btn ${state.singlePersonConfirmed ? "" : "disabled"}" data-action="photo-next">确认照片并填写数据</button></div>`;
 }
 
 function guideShot(src, label, cls, pos) {
@@ -444,7 +465,9 @@ async function beginGeneration() {
   }, 650);
   try {
     const response = await callTryOnApi();
-    state.resultSrc = response.image;
+    state.queueMessage = "正在保护人脸身份特征…";
+    updateGenerationStatus();
+    state.resultSrc = await protectIdentityFace(response.image, state.personSrc);
     state.requestId = response.requestId || "";
     state.progress = 100;
     const bar = $("#progressBar");
@@ -582,7 +605,7 @@ function settingsPage() {
   <div class="settings-section"><h3>隐私与安全</h3><div class="menu-list"><button class="menu-item" data-action="privacy"><span>▣</span><b>隐私与授权</b><small>相机、相册、数据权限 ›</small></button><button class="menu-item" data-action="account"><span>◉</span><b>账号与安全</b><small>手机号、密码、登录管理 ›</small></button></div></div>
   <div class="settings-section"><h3>服务与帮助</h3><div class="menu-list"><button class="menu-item" data-action="help"><span>?</span><b>客服帮助</b><small>在线咨询 · 常见问题 ›</small></button></div></div>
   <button class="danger-btn" data-action="delete-all-data">删除本机全部个人数据</button>
-  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v1.4 直连 AI 版</p>`;
+  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v1.5 单人校验与人脸保护版</p>`;
 }
 
 function bindInputs() {
@@ -606,9 +629,13 @@ function bindInputs() {
         } else {
           state.personOriginalSrc = dataUrl;
           state.personSrc = dataUrl;
+          state.personCropZoom = 1;
+          state.personCropX = 0;
+          state.personCropY = 0;
+          state.singlePersonConfirmed = false;
           state.usingDemo = false;
           state.profileReady = false;
-          go("photoGuide");
+          go("personCrop");
         }
       } catch (error) {
         toast(error.message || "图片处理失败，请换一张重试");
@@ -648,6 +675,37 @@ function bindInputs() {
   cropZoom?.addEventListener("input", () => {
     state.cropZoom = Number(cropZoom.value);
     if (cropImage) cropImage.style.transform = `translate3d(${state.cropX}px,${state.cropY}px,0) scale(${state.cropZoom})`;
+  });
+  const personStage = $("[data-person-crop-stage]");
+  const personImage = $("#personCropImage");
+  const personZoom = $("#personCropZoom");
+  if (personStage && personImage) {
+    let dragging = false;
+    let startX = 0;
+    let startY = 0;
+    let originX = state.personCropX;
+    let originY = state.personCropY;
+    personStage.addEventListener("pointerdown", event => {
+      dragging = true;
+      startX = event.clientX;
+      startY = event.clientY;
+      originX = state.personCropX;
+      originY = state.personCropY;
+      personStage.setPointerCapture?.(event.pointerId);
+    });
+    personStage.addEventListener("pointermove", event => {
+      if (!dragging) return;
+      state.personCropX = originX + event.clientX - startX;
+      state.personCropY = originY + event.clientY - startY;
+      personImage.style.transform = `translate3d(${state.personCropX}px,${state.personCropY}px,0) scale(${state.personCropZoom})`;
+    });
+    const stopPersonDrag = () => { dragging = false; };
+    personStage.addEventListener("pointerup", stopPersonDrag);
+    personStage.addEventListener("pointercancel", stopPersonDrag);
+  }
+  personZoom?.addEventListener("input", () => {
+    state.personCropZoom = Number(personZoom.value);
+    if (personImage) personImage.style.transform = `translate3d(${state.personCropX}px,${state.personCropY}px,0) scale(${state.personCropZoom})`;
   });
 }
 
@@ -784,6 +842,67 @@ async function applyProductCrop() {
   state.cropApplied = true;
 }
 
+async function applyPersonCrop() {
+  const source = state.personOriginalSrc || state.personSrc;
+  const image = await loadImage(source);
+  const canvas = document.createElement("canvas");
+  canvas.width = 900;
+  canvas.height = 1200;
+  const ctx = canvas.getContext("2d", { alpha: false });
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const baseScale = Math.max(canvas.width / image.naturalWidth, canvas.height / image.naturalHeight);
+  const scale = baseScale * state.personCropZoom;
+  const stageWidth = $("[data-person-crop-stage]")?.clientWidth || 360;
+  const offsetScale = canvas.width / stageWidth;
+  const width = image.naturalWidth * scale;
+  const height = image.naturalHeight * scale;
+  ctx.drawImage(image, (canvas.width - width) / 2 + state.personCropX * offsetScale, (canvas.height - height) / 2 + state.personCropY * offsetScale, width, height);
+  const cropped = canvas.toDataURL("image/jpeg", 0.92);
+  state.personOriginalSrc = cropped;
+  state.personSrc = cropped;
+  state.singlePersonConfirmed = false;
+}
+
+async function protectIdentityFace(resultSrc, identitySrc) {
+  try {
+    const [result, identity] = await Promise.all([loadImage(resultSrc), loadImage(identitySrc)]);
+    const canvas = document.createElement("canvas");
+    canvas.width = result.naturalWidth || 768;
+    canvas.height = result.naturalHeight || 1024;
+    const ctx = canvas.getContext("2d", { alpha: false });
+    ctx.drawImage(result, 0, 0, canvas.width, canvas.height);
+    const overlay = document.createElement("canvas");
+    overlay.width = canvas.width;
+    overlay.height = canvas.height;
+    const overlayCtx = overlay.getContext("2d");
+    overlayCtx.drawImage(identity, 0, 0, canvas.width, canvas.height);
+    overlayCtx.globalCompositeOperation = "destination-in";
+    const cx = canvas.width * 0.5;
+    const cy = canvas.height * 0.135;
+    const rx = canvas.width * 0.072;
+    const ry = canvas.height * 0.06;
+    overlayCtx.save();
+    overlayCtx.translate(cx, cy);
+    overlayCtx.scale(rx, ry);
+    const feather = overlayCtx.createRadialGradient(0, 0, 0.55, 0, 0, 1);
+    feather.addColorStop(0, "rgba(0,0,0,1)");
+    feather.addColorStop(0.72, "rgba(0,0,0,.92)");
+    feather.addColorStop(1, "rgba(0,0,0,0)");
+    overlayCtx.fillStyle = feather;
+    overlayCtx.beginPath();
+    overlayCtx.arc(0, 0, 1, 0, Math.PI * 2);
+    overlayCtx.fill();
+    overlayCtx.restore();
+    ctx.globalAlpha = 0.94;
+    ctx.drawImage(overlay, 0, 0);
+    ctx.globalAlpha = 1;
+    return canvas.toDataURL("image/jpeg", 0.93);
+  } catch (error) {
+    return resultSrc;
+  }
+}
+
 async function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -867,7 +986,7 @@ async function callTryOnApi() {
       uploadToGradio(base, personBlob, "person.jpg"),
       uploadToGradio(base, garmentBlob, "garment.jpg")
     ]);
-    const result = await callGradioDirect(base, "tryon", [personFile, garmentFile, category, false, requestId, 16, 2.5, 42], {
+    const result = await callGradioDirect(base, "tryon", [personFile, garmentFile, category, false, requestId, 24, 2.5, 42], {
       timeout: 240000,
       onEvent: event => {
         state.queueMessage = event === "pending" ? "请求已提交，正在等待免费 GPU…" : event === "generating" ? "GPU 已开始生成，请保持页面打开…" : "正在接收生成结果…";
@@ -978,7 +1097,7 @@ async function dbDelete(key) {
 }
 
 async function saveProfile() {
-  const profile = { bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender, userName: state.userName, avatarVersion: 3, updatedAt: Date.now() };
+  const profile = { bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender, userName: state.userName, avatarVersion: 4, updatedAt: Date.now() };
   if (state.usingDemo) { state.profileReady = true; return; }
   localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
   if (state.personSrc) await dbSet("profileImage", state.personSrc);
@@ -1024,7 +1143,7 @@ async function loadAppData() {
     }
     state.personSrc = profileImage || "";
     state.personOriginalSrc = profileOriginalImage || profileImage || "";
-    state.profileReady = Boolean(profile && profileImage && profile.avatarVersion === 3);
+    state.profileReady = Boolean(profile && profileImage && profile.avatarVersion === 4);
     state.records = Array.isArray(records) ? records : [];
   } catch (error) {
     console.warn("Local profile could not be loaded", error);
@@ -1106,7 +1225,23 @@ document.addEventListener("click", event => {
     "recrop": () => { state.cropZoom=1; state.cropX=0; state.cropY=0; state.cropApplied=false; render(); toast("已重置裁剪区域"); },
     "person-reselect-product": () => go("upload"),
     "edit-recognition": () => go("category"),
-    "recognition-next": async () => { try { await applyProductCrop(); go("category"); } catch (error) { toast("裁剪失败，请重新选择图片"); } },
+    "recognition-next": async () => {
+      if (state.productCleaning) return;
+      state.productCleaning = true;
+      trigger.disabled = true;
+      trigger.textContent = "AI 正在净化商品图…";
+      try {
+        await applyProductCrop();
+        try {
+          state.productSrc = await createWhiteBackgroundAvatar(state.productSrc);
+          state.productCleaned = true;
+        } catch (cleanError) {
+          state.productCleaned = false;
+        }
+        go("category");
+      } catch (error) { toast("裁剪失败，请重新选择图片"); }
+      finally { state.productCleaning = false; }
+    },
     "category-next": () => { if (state.profileReady) go("confirm"); else { state.resumeTryOn=true; go("personUpload"); } },
     "generate-avatar": () => {
       if (!state.bodyData.height || !state.bodyData.weight) return toast("请先填写身高和体重");
@@ -1119,9 +1254,13 @@ document.addEventListener("click", event => {
     "avatar-upload-photo": () => { state.resumeTryOn=false; go("personUpload"); },
     "favorite-avatar": () => toast("数字形象已收藏"),
     "measure-help": () => openModal("身体数据测量方法", `<p><b>肩宽：</b>左右肩峰之间的直线距离。</p><p><b>胸围：</b>胸部最丰满处水平一周。</p><p><b>腰围：</b>自然腰线最细处水平一周。</p><p><b>臀围：</b>臀部最丰满处水平一周。</p>`),
-    "demo-person": () => { state.personSrc="assets/person-clean.webp"; state.personOriginalSrc=state.personSrc; state.usingDemo=true; state.profileReady=false; go("photoGuide"); },
+    "demo-person": () => { state.personSrc="assets/person-clean.webp"; state.personOriginalSrc=state.personSrc; state.personCropZoom=1; state.personCropX=0; state.personCropY=0; state.singlePersonConfirmed=false; state.usingDemo=true; state.profileReady=false; go("personCrop"); },
     "person-reselect": () => go("personUpload"),
-    "photo-next": () => go("bodyData"),
+    "reset-person-crop": () => { state.personCropZoom=1; state.personCropX=0; state.personCropY=0; render(); },
+    "apply-person-crop": async () => { try { await applyPersonCrop(); go("photoGuide"); } catch (error) { toast("人物裁剪失败，请重新选择照片"); } },
+    "back-to-person-crop": () => go("personCrop"),
+    "toggle-single-person": () => { state.singlePersonConfirmed=!state.singlePersonConfirmed; render(); },
+    "photo-next": () => { if (!state.singlePersonConfirmed) return toast("请先确认画面中只有你本人一张脸"); go("bodyData"); },
     generate: () => { if (!state.consent) return openModal("需要图片处理授权", `<p>只有在你主动点击生成时，人物照和商品图才会发送至 AI 服务进行本次换装。请先在隐私设置中允许。</p>`, `<button class="primary-btn full" data-action="privacy">查看并授权</button>`); state.progress=0; state.generationError=""; go("generating"); },
     favorite: () => { state.favorite=!state.favorite; render(); toast(state.favorite ? "已收藏" : "已取消收藏"); },
     download: () => { const a=document.createElement("a"); a.href=state.resultSrc; a.download="TRY-ON-试穿预览.webp"; a.click(); toast("已开始下载预览图"); },
