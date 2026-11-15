@@ -1,4 +1,5 @@
 window.TRYON_CONFIG = {
-  apiBase: "",
-  apiMode: "hf-zero-gpu"
+  apiBase: "https://monk7-vtryon-a.hf.space",
+  spaceId: "monk7/vtryon-a",
+  apiMode: "hf-public-leffa"
 };
