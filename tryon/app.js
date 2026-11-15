@@ -1557,10 +1557,14 @@ document.addEventListener("click", event => {
       finally { state.productCleaning = false; }
     },
     "category-next": () => { if (!state.garmentSubtype) return toast("请先确认毛衣、夹克等具体款式"); if (state.profileReady) go("confirm"); else { state.resumeTryOn=true; go("personUpload"); } },
-    "generate-avatar": () => {
+    "generate-avatar": async () => {
       if (!state.consent) return openModal("需要图片处理授权", `<p>生成正面数字形象需要把你选择的个人照片发送至 Hugging Face 公共生成式图像模型。请先查看并允许。</p>`, `<button class="primary-btn full" data-action="privacy">查看并授权</button>`);
       if (!state.bodyData.height || !state.bodyData.weight) return toast("请先填写身高和体重");
       if (!state.personSrc) return toast("请先上传一张正面全身照");
+      const source = state.personOriginalSrc || state.personSrc;
+      const fingerprint = await computeAvatarFingerprint(source).catch(() => "");
+      const canUseCache = Boolean(state.profileReady && fingerprint && state.avatarFingerprint === fingerprint && state.personSrc);
+      if (canUseCache) { state.avatarProgress=0; return go("avatarGenerating"); }
       if (!state.hfToken) return openFreeAccountModal("avatar");
       state.avatarProgress = 0;
       go("avatarGenerating");
