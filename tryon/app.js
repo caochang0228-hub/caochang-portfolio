@@ -5,7 +5,7 @@ const PROFILE_KEY = "tryon-profile-v2";
 const PREFS_KEY = "tryon-prefs-v2";
 const DB_NAME = "tryon-local-v2";
 const DB_STORE = "assets";
-const AVATAR_SPACE_ID = "briaai/BRIA-RMBG-2.0";
+const AVATAR_API_BASE = "https://briaai-bria-rmbg-2-0.hf.space";
 
 const state = {
   screen: "welcome",
@@ -31,6 +31,7 @@ const state = {
   requestId: "",
   generationRunning: false,
   avatarRunning: false,
+  avatarError: "",
   currentJob: null,
   queueMessage: "正在连接免费 GPU…",
   queuePosition: null,
@@ -56,6 +57,7 @@ const screenTitles = {
   category: "选择服装类型",
   bodyData: "身体数据",
   avatarGenerating: "生成个人形象",
+  avatarError: "形象生成失败",
   avatarResult: "个人形象确认",
   personUpload: "上传个人照片",
   photoGuide: "拍照指南与确认",
@@ -143,6 +145,7 @@ function render() {
     category: categoryPage,
     bodyData: bodyDataPage,
     avatarGenerating: avatarGeneratingPage,
+    avatarError: avatarErrorPage,
     avatarResult: avatarResultPage,
     personUpload: personUploadPage,
     photoGuide: photoGuidePage,
@@ -331,18 +334,17 @@ async function beginAvatarGeneration() {
     await delay(300);
     if (state.screen === "avatarGenerating") go("avatarResult", { replace: true });
   } catch (error) {
-    const status = $("#avatarStatus");
-    if (status) status.textContent = "AI 抠图服务繁忙，已先生成白底标准化形象；稍后可在“我的”中重新生成。";
-    state.personSrc = await createStudioFallback(state.personOriginalSrc || state.personSrc);
-    state.avatarProgress = 100;
-    state.profileReady = true;
-    await saveProfile();
-    await delay(900);
-    if (state.screen === "avatarGenerating") go("avatarResult", { replace: true });
+    state.avatarError = friendlyAvatarError(error);
+    state.profileReady = false;
+    if (state.screen === "avatarGenerating") go("avatarError", { replace: true });
   } finally {
     clearInterval(timer);
     state.avatarRunning = false;
   }
+}
+
+function avatarErrorPage() {
+  return `<div class="generation error-state"><div class="error-orbit">!</div><span class="micro-label">AVATAR GENERATION STOPPED</span><h2>白底数字形象<br>还没有生成成功</h2><p>${escapeHtml(state.avatarError || "AI 服务暂时不可用，请稍后重试。")}</p><div class="tips-card"><h4>本次不会保存原图冒充数字形象</h4><p>✓ 请保持当前页面打开</p><p>✓ 建议切换稳定 Wi-Fi 后重试</p><p>✓ 照片应完整包含头部到脚部</p></div><div class="button-row"><button class="ghost-btn" data-action="person-reselect">更换照片</button><button class="primary-btn" data-action="retry-avatar">重新生成</button></div></div>`;
 }
 
 function avatarResultPage() {
@@ -580,7 +582,7 @@ function settingsPage() {
   <div class="settings-section"><h3>隐私与安全</h3><div class="menu-list"><button class="menu-item" data-action="privacy"><span>▣</span><b>隐私与授权</b><small>相机、相册、数据权限 ›</small></button><button class="menu-item" data-action="account"><span>◉</span><b>账号与安全</b><small>手机号、密码、登录管理 ›</small></button></div></div>
   <div class="settings-section"><h3>服务与帮助</h3><div class="menu-list"><button class="menu-item" data-action="help"><span>?</span><b>客服帮助</b><small>在线咨询 · 常见问题 ›</small></button></div></div>
   <button class="danger-btn" data-action="delete-all-data">删除本机全部个人数据</button>
-  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v1.3 AI 数字形象版</p>`;
+  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v1.4 直连 AI 版</p>`;
 }
 
 function bindInputs() {
@@ -684,18 +686,73 @@ function processImageFile(file) {
   });
 }
 
-let gradioModulePromise;
-const gradioClients = new Map();
+async function uploadToGradio(base, blob, filename) {
+  const form = new FormData();
+  const file = new File([blob], filename, { type: blob.type || "image/jpeg" });
+  form.append("files", file);
+  const response = await fetch(`${base.replace(/\/$/, "")}/gradio_api/upload`, { method: "POST", body: form });
+  if (!response.ok) throw new Error(`HF_UPLOAD_${response.status}`);
+  const uploaded = await response.json();
+  if (!Array.isArray(uploaded) || !uploaded[0]) throw new Error("HF_UPLOAD_EMPTY");
+  return { path: uploaded[0], orig_name: filename, mime_type: file.type, meta: { _type: "gradio.FileData" } };
+}
 
-async function getGradioClient(spaceId = CONFIG.spaceId || CONFIG.apiBase) {
-  if (!gradioModulePromise) {
-    gradioModulePromise = import("https://cdn.jsdelivr.net/npm/@gradio/client@2.7.0/dist/index.min.js");
+function parseSseBlock(block) {
+  const event = (block.match(/^event:\s*(.+)$/m) || [])[1] || "message";
+  const data = block.split("\n").filter(line => line.startsWith("data:")).map(line => line.slice(5).trim()).join("");
+  return { event, data };
+}
+
+async function callGradioDirect(base, endpoint, data, options = {}) {
+  const cleanBase = base.replace(/\/$/, "");
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), options.timeout || 240000);
+  state.currentJob = { cancel: () => controller.abort() };
+  try {
+    const startResponse = await fetch(`${cleanBase}/gradio_api/call/${endpoint}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data }),
+      signal: controller.signal
+    });
+    const started = await startResponse.json().catch(() => ({}));
+    if (!startResponse.ok || !started.event_id) throw new Error(started.detail || started.message || `HF_START_${startResponse.status}`);
+    state.requestId = started.event_id;
+    options.onEvent?.("pending", null);
+    const resultResponse = await fetch(`${cleanBase}/gradio_api/call/${endpoint}/${encodeURIComponent(started.event_id)}`, {
+      headers: { Accept: "text/event-stream" }, signal: controller.signal
+    });
+    if (!resultResponse.ok) throw new Error(`HF_RESULT_${resultResponse.status}`);
+    const reader = resultResponse.body?.getReader();
+    if (!reader) {
+      const text = await resultResponse.text();
+      const blocks = text.trim().split(/\n\n+/);
+      const complete = blocks.map(parseSseBlock).findLast?.(item => item.event === "complete") || blocks.map(parseSseBlock).reverse().find(item => item.event === "complete");
+      if (!complete?.data) throw new Error("HF_INCOMPLETE_RESULT");
+      return JSON.parse(complete.data);
+    }
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+      const blocks = buffer.split(/\n\n+/);
+      buffer = blocks.pop() || "";
+      for (const block of blocks) {
+        const parsed = parseSseBlock(block);
+        options.onEvent?.(parsed.event, parsed.data);
+        if (parsed.event === "error") throw new Error(parsed.data || "HF_GENERATION_FAILED");
+        if (parsed.event === "complete") return JSON.parse(parsed.data || "null");
+      }
+      if (done) break;
+    }
+    const tail = parseSseBlock(buffer);
+    if (tail.event === "complete" && tail.data) return JSON.parse(tail.data);
+    throw new Error("HF_INCOMPLETE_RESULT");
+  } finally {
+    clearTimeout(timeoutId);
+    state.currentJob = null;
   }
-  const { Client, handle_file } = await gradioModulePromise;
-  if (!gradioClients.has(spaceId)) {
-    gradioClients.set(spaceId, Client.connect(spaceId, { events: ["status", "data"] }));
-  }
-  return { client: await gradioClients.get(spaceId), handleFile: handle_file };
 }
 
 function loadImage(src) {
@@ -774,18 +831,21 @@ async function compositeOnWhite(src) {
 
 async function createWhiteBackgroundAvatar(source) {
   if (!source) throw new Error("MISSING_PERSON_IMAGE");
-  const { client, handleFile } = await getGradioClient(AVATAR_SPACE_ID);
   const blob = await fetch(source).then(response => response.blob());
-  const task = client.predict("/image", [handleFile(blob)]);
-  const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("AVATAR_TIMEOUT")), 120000));
-  const result = await Promise.race([task, timeout]);
-  const file = extractRemoteFile(result?.data?.[1]) || extractRemoteFile(result?.data?.[0]);
+  const uploaded = await uploadToGradio(AVATAR_API_BASE, blob, "person.jpg");
+  const result = await callGradioDirect(AVATAR_API_BASE, "image", [uploaded], { timeout: 150000 });
+  let file = extractRemoteFile(result?.[1]) || extractRemoteFile(result?.[0]);
   if (!file) throw new Error("AVATAR_EMPTY_RESULT");
+  if (!/^https?:|^data:/i.test(file)) file = `${AVATAR_API_BASE}/gradio_api/file=${encodeURIComponent(file)}`;
   return compositeOnWhite(file);
 }
 
-async function createStudioFallback(source) {
-  return compositeOnWhite(source);
+function friendlyAvatarError(error) {
+  const text = String(error?.message || error || "");
+  if (error?.name === "AbortError" || /AVATAR_TIMEOUT/i.test(text)) return "免费 AI 抠图服务等待超时，请稍后重新生成。";
+  if (/HF_UPLOAD|Failed to fetch|network|fetch/i.test(text)) return "手机网络暂时无法连接白底形象服务，请切换 Wi-Fi 后重试。";
+  if (/quota|ZeroGPU|429|capacity|busy/i.test(text)) return "当前免费 GPU 额度或容量不足，请稍后重试。";
+  return text.length < 120 ? text : "白底数字形象服务暂时不可用，请稍后重试。";
 }
 
 async function callTryOnApi() {
@@ -796,54 +856,32 @@ async function callTryOnApi() {
     const requestId = globalThis.crypto?.randomUUID?.() || `tryon-${Date.now()}`;
     state.requestId = requestId;
     const category = { top: "upper", bottom: "lower", dress: "dress" }[state.garmentType] || "upper";
-    const timeout = new Promise((_, reject) => {
-      setTimeout(() => {
-        const error = new Error("HF_TIMEOUT");
-        error.name = "AbortError";
-        reject(error);
-      }, 240000);
+    const base = CONFIG.apiBase.replace(/\/$/, "");
+    const [personBlob, garmentBlob] = await Promise.all([
+      fetch(state.personSrc).then(response => response.blob()),
+      fetch(state.productSrc).then(response => response.blob())
+    ]);
+    state.queueMessage = "正在上传人物与商品图片…";
+    updateGenerationStatus();
+    const [personFile, garmentFile] = await Promise.all([
+      uploadToGradio(base, personBlob, "person.jpg"),
+      uploadToGradio(base, garmentBlob, "garment.jpg")
+    ]);
+    const result = await callGradioDirect(base, "tryon", [personFile, garmentFile, category, false, requestId, 16, 2.5, 42], {
+      timeout: 240000,
+      onEvent: event => {
+        state.queueMessage = event === "pending" ? "请求已提交，正在等待免费 GPU…" : event === "generating" ? "GPU 已开始生成，请保持页面打开…" : "正在接收生成结果…";
+        updateGenerationStatus();
+      }
     });
-    const task = (async () => {
-      const { client, handleFile } = await getGradioClient();
-      const [personBlob, garmentBlob] = await Promise.all([
-        fetch(state.personSrc).then(response => response.blob()),
-        fetch(state.productSrc).then(response => response.blob())
-      ]);
-      const job = client.submit("/tryon", {
-        person_image: handleFile(personBlob),
-        garment_image: handleFile(garmentBlob),
-        category,
-        garment_is_worn: false,
-        request_hash: requestId,
-        steps: 16,
-        scale: 2.5,
-        seed: 42
-      });
-      state.currentJob = job;
-      let payload = null;
-      for await (const message of job) {
-        if (message.type === "status") {
-          const stage = message.stage || message.status;
-          state.queuePosition = Number.isFinite(message.position) ? message.position + 1 : null;
-          state.queueEta = Number.isFinite(message.eta) ? Math.max(0, Math.round(message.eta)) : null;
-          state.queueMessage = stage === "pending"
-            ? `免费 GPU 排队中${state.queuePosition ? ` · 前方 ${Math.max(0, state.queuePosition - 1)} 人` : ""}${state.queueEta ? ` · 约 ${state.queueEta} 秒` : ""}`
-            : stage === "generating" ? "GPU 已开始生成，请保持页面打开…" : "正在接收生成结果…";
-          updateGenerationStatus();
-          if (stage === "error") throw new Error(message.message || "HF_GENERATION_FAILED");
-        }
-        if (message.type === "data") payload = Array.isArray(message.data) ? message.data[0] : message.data;
-      }
-      if (!payload?.ok || !payload?.image) {
-        const error = new Error(payload?.message || payload?.error_code || "HF_GENERATION_FAILED");
-        error.code = payload?.error_code;
-        error.requestId = payload?.request_hash || requestId;
-        throw error;
-      }
-      return { image: payload.image, requestId: payload.request_hash || requestId };
-    })();
-    try { return await Promise.race([task, timeout]); }
-    finally { state.currentJob = null; }
+    const payload = Array.isArray(result) ? result[0] : result;
+    if (!payload?.ok || !payload?.image) {
+      const error = new Error(payload?.message || payload?.error_code || "HF_GENERATION_FAILED");
+      error.code = payload?.error_code;
+      error.requestId = payload?.request_hash || requestId;
+      throw error;
+    }
+    return { image: payload.image, requestId: payload.request_hash || requestId };
   }
 
   const controller = new AbortController();
@@ -892,6 +930,8 @@ function friendlyApiError(error) {
   const text = String(error?.message || error || "");
   if (text.includes("AI_BACKEND_NOT_CONFIGURED")) return "免费 AI 空间尚未绑定。完成 Hugging Face Space 部署后即可真实生成。";
   if (text.includes("MISSING_IMAGES")) return "缺少人物照或商品图，请返回重新上传。";
+  if (/Space metadata could not be loaded/i.test(text)) return "当前仍在使用旧版 AI 连接，请关闭页面后从最新链接重新打开。";
+  if (/HF_UPLOAD/i.test(text)) return "图片上传到 AI 服务失败，请切换稳定 Wi-Fi 后重试。";
   if (/quota|exceeded|ZeroGPU|GPU quota/i.test(text)) return "今天的免费 GPU 额度可能已经用完，请在额度恢复后重试。";
   if (/queue|busy|capacity|429/i.test(text)) return "当前免费 GPU 排队人数较多，请稍后重试。";
   if (/cors|fetch|network|Failed to fetch/i.test(text)) return "暂时无法连接 Hugging Face AI 空间，请检查网络后重试。";
@@ -938,7 +978,7 @@ async function dbDelete(key) {
 }
 
 async function saveProfile() {
-  const profile = { bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender, userName: state.userName, avatarVersion: 2, updatedAt: Date.now() };
+  const profile = { bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender, userName: state.userName, avatarVersion: 3, updatedAt: Date.now() };
   if (state.usingDemo) { state.profileReady = true; return; }
   localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
   if (state.personSrc) await dbSet("profileImage", state.personSrc);
@@ -984,7 +1024,7 @@ async function loadAppData() {
     }
     state.personSrc = profileImage || "";
     state.personOriginalSrc = profileOriginalImage || profileImage || "";
-    state.profileReady = Boolean(profile && profileImage && profile.avatarVersion === 2);
+    state.profileReady = Boolean(profile && profileImage && profile.avatarVersion === 3);
     state.records = Array.isArray(records) ? records : [];
   } catch (error) {
     console.warn("Local profile could not be loaded", error);
@@ -1116,6 +1156,7 @@ document.addEventListener("click", event => {
     "delete-all-data": () => openModal("删除全部个人数据？", `<p>这会删除本机保存的个人照片、身体数据、风格偏好和全部试穿记录，无法撤销。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="confirm-delete-all">确认全部删除</button></div>`),
     "confirm-delete-all": async () => { await deleteAllLocalData(); closeModal(); state.screen="welcome"; state.history=[]; render(); toast("本机个人数据已全部删除"); },
     "retry-generate": () => { state.generationError=""; state.progress=0; go("generating", {replace:true}); },
+    "retry-avatar": () => { state.avatarError=""; state.avatarProgress=0; go("avatarGenerating", {replace:true}); },
     "cancel-generation": () => { state.currentJob?.cancel?.(); state.currentJob=null; state.generationRunning=false; go("confirm", {replace:true}); toast("已取消本次生成"); },
     "back-to-confirm": () => go("confirm", {replace:true}),
     "dismiss-install": () => {
