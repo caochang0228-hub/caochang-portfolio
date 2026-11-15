@@ -178,6 +178,14 @@ img { display: block; max-width: 100%; }
 .single-person-check.active span { color:#fff; background:#74482b; }
 .primary-btn.disabled { opacity:.45; }
 .recognition-card { position:relative; z-index:2; margin:6px 0 0; padding:17px; border-radius:20px; background:#fffdfb; box-shadow:0 8px 22px rgba(38,26,15,.08); }
+.source-confirm { margin-top:12px; padding:12px; border:1px solid #eee4da; border-radius:15px; background:#fcf8f4; }
+.source-confirm > b { display:block; margin-bottom:9px; font-size:12px; }
+.source-confirm p { margin:8px 2px 0; color:#766c63; font-size:10px; line-height:1.55; }
+.subtype-card { margin:12px 0; padding:15px; border:1px solid #ece4dc; border-radius:18px; background:linear-gradient(145deg,#fff,#fcf8f3); }
+.subtype-card > b { display:block; font-size:14px; }
+.subtype-card > p { margin:5px 0 11px; color:#7b7067; font-size:10px; line-height:1.5; }
+.subtype-chips { gap:8px; }
+.subtype-chips .chip { padding:8px 11px; border:1px solid transparent; }
 .confidence { display:flex; align-items:center; justify-content:space-between; margin-bottom:13px; }
 .confidence b { font-size:16px; }
 .confidence span { color:var(--caramel); font-weight:800; }
