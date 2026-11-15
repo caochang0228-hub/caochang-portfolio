@@ -1,6 +1,6 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 
-const CONFIG = window.TRYON_CONFIG || { apiBase: "", apiMode: "fashn-tryon" };
+const CONFIG = window.TRYON_CONFIG || { apiBase: "", apiMode: "hf-zero-gpu" };
 const PROFILE_KEY = "tryon-profile-v2";
 const PREFS_KEY = "tryon-prefs-v2";
 const DB_NAME = "tryon-local-v2";
@@ -280,7 +280,7 @@ function avatarGeneratingPage() {
     <div class="scan-frame photo-scan">${state.personSrc ? `<img src="${state.personSrc}" alt="正在建立的个人形象">` : `<div class="scan-silhouette">♙</div>`}<i></i><span></span></div>
     <span class="micro-label">AI BODY PROFILE</span>
     <h2>正在建立你的<br>个人数字形象</h2>
-    <p>保存人脸与全身特征，准备后续腾讯云 AI 换装</p>
+    <p>保存人脸与全身特征，准备后续开源 AI 真实试穿</p>
     <div class="progress-wrap"><div class="progress-track"><div id="avatarProgressBar" class="progress-bar" style="width:${state.avatarProgress}%"></div></div><span id="avatarProgressNum" class="progress-num">${state.avatarProgress}%</span></div>
     <div class="generation-tags"><span>照片优化</span><span>数据建档</span><span>形象确认</span></div>
     <div class="info-strip"><span>✦</span><span>数字形象用于穿搭预览，不代表精确的人体测量或尺码建议。</span></div>
@@ -368,7 +368,7 @@ function confirmPage() {
     <button class="setting-row" data-action="style-pref"><span>♙</span><span>风格偏好</span><b>${state.stylePrefs.join(" · ") || "未设置"} ›</b></button>
     <div class="setting-row"><span>✧</span><span>生成预览</span><b>标准（1张） ›</b></div>
   </div>
-  <div class="info-strip"><span>ⓘ</span><span>将调用 FASHN AI 换装服务。每张结果消耗 1 个 API credit，仅作为穿搭视觉参考。</span></div>
+  <div class="info-strip"><span>ⓘ</span><span>将调用 Hugging Face ZeroGPU 上的开源 CatVTON 模型。免费额度有限，高峰期可能需要排队。</span></div>
   <div class="sticky-actions"><button class="primary-btn full" data-action="generate">✧ 开始 AI 试穿</button></div>`;
 }
 
@@ -376,7 +376,7 @@ function generatingPage() {
   return `<div class="generation">
     <div class="orbit"><div class="orbit-core">⌁</div></div>
     <h2>AI 正在生成试穿效果…</h2>
-    <p>腾讯云正在分析服装结构、人物轮廓与面部特征</p>
+    <p>ZeroGPU 正在分析服装结构、人物轮廓与面部特征</p>
     <div class="progress-wrap"><div class="progress-track"><div id="progressBar" class="progress-bar" style="width:${state.progress}%"></div></div><span id="progressNum" class="progress-num">${state.progress}%</span></div>
     <div class="generation-meta"><span>◷ 预计等待<b>20–60 秒</b></span><i></i><span>▱ 生成张数<b>1 张预览图</b></span></div>
     <div class="tips-card"><h4>✧ 试穿小贴士</h4><p>✓ 清晰照片有助于保持人物特征</p><p>✓ 系统会尽量保留领口、袖口与面料细节</p><p>✓ 视觉预览不等同于真实尺码与合身效果</p></div>
@@ -504,7 +504,7 @@ function settingsPage() {
   <div class="settings-section"><h3>隐私与安全</h3><div class="menu-list"><button class="menu-item" data-action="privacy"><span>▣</span><b>隐私与授权</b><small>相机、相册、数据权限 ›</small></button><button class="menu-item" data-action="account"><span>◉</span><b>账号与安全</b><small>手机号、密码、登录管理 ›</small></button></div></div>
   <div class="settings-section"><h3>服务与帮助</h3><div class="menu-list"><button class="menu-item" data-action="help"><span>?</span><b>客服帮助</b><small>在线咨询 · 常见问题 ›</small></button></div></div>
   <button class="danger-btn" data-action="delete-all-data">删除本机全部个人数据</button>
-  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v1.1 腾讯云 AI 版</p>`;
+  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v1.2 CatVTON ZeroGPU 版</p>`;
 }
 
 function bindInputs() {
@@ -575,28 +575,44 @@ async function callTryOnApi() {
   if (!CONFIG.apiBase) throw new Error("AI_BACKEND_NOT_CONFIGURED");
   if (!state.personSrc || !state.productSrc) throw new Error("MISSING_IMAGES");
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120000);
+  const timeout = setTimeout(() => controller.abort(), 300000);
+  const base = CONFIG.apiBase.replace(/\/$/, "");
+  const garmentType = { top: "upper", bottom: "lower", dress: "overall" }[state.garmentType] || "upper";
   try {
-    const response = await fetch(`${CONFIG.apiBase.replace(/\/$/, "")}/tryon`, {
+    const startResponse = await fetch(`${base}/gradio_api/call/try_on`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        modelImage: state.personSrc,
-        clothesImage: state.productSrc,
-        clothesType: { top: "Upper-body", bottom: "Lower-body", dress: "Dress" }[state.garmentType],
-        bodyProfile: state.bodyData,
-        consent: state.consent
+        data: [state.personSrc, state.productSrc, garmentType, 30, 2.5, -1]
       }),
       signal: controller.signal
     });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data.image) {
-      const error = new Error(data.message || `HTTP_${response.status}`);
-      error.code = data.code;
-      error.requestId = data.requestId;
-      throw error;
+    const started = await startResponse.json().catch(() => ({}));
+    if (!startResponse.ok || !started.event_id) {
+      throw new Error(started.detail || started.message || `HF_START_${startResponse.status}`);
     }
-    return data;
+
+    state.requestId = started.event_id;
+    const resultResponse = await fetch(
+      `${base}/gradio_api/call/try_on/${encodeURIComponent(started.event_id)}`,
+      { headers: { Accept: "text/event-stream" }, signal: controller.signal }
+    );
+    const eventText = await resultResponse.text();
+    if (!resultResponse.ok) throw new Error(`HF_RESULT_${resultResponse.status}`);
+
+    const events = eventText.trim().split(/\n\n+/);
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const block = events[i];
+      const eventName = (block.match(/^event:\s*(.+)$/m) || [])[1];
+      const dataText = block.split("\n").filter(line => line.startsWith("data:")).map(line => line.slice(5).trim()).join("");
+      if (eventName === "error") throw new Error(dataText || "HF_GENERATION_FAILED");
+      if (eventName !== "complete" || !dataText) continue;
+      const payload = JSON.parse(dataText);
+      const image = Array.isArray(payload) ? payload[0] : payload;
+      if (!image || typeof image !== "string") throw new Error("HF_EMPTY_RESULT");
+      return { image, requestId: started.event_id };
+    }
+    throw new Error("HF_INCOMPLETE_RESULT");
   } finally {
     clearTimeout(timeout);
   }
@@ -604,13 +620,15 @@ async function callTryOnApi() {
 
 function friendlyApiError(error) {
   if (error?.requestId) state.requestId = error.requestId;
-  if (error?.name === "AbortError") return "生成等待超过 2 分钟，服务可能繁忙，请稍后重试。";
+  if (error?.name === "AbortError") return "免费 GPU 排队或生成超过 5 分钟，请稍后重新尝试。";
   const text = String(error?.message || error || "");
-  if (text.includes("AI_BACKEND_NOT_CONFIGURED")) return "腾讯云 AI 后端尚未完成连接，请在服务配置完成后重试。";
+  if (text.includes("AI_BACKEND_NOT_CONFIGURED")) return "免费 AI 空间尚未绑定。完成 Hugging Face Space 部署后即可真实生成。";
   if (text.includes("MISSING_IMAGES")) return "缺少人物照或商品图，请返回重新上传。";
-  if (/quota|balance|ResourceInsufficient|欠费|余额/i.test(text)) return "腾讯云额度不足或后付费未开通，请检查账号余额与模特换装服务。";
-  if (/cors|fetch|network|Failed to fetch/i.test(text)) return "无法连接腾讯云生成服务，请检查网络或后端域名配置。";
-  return text.length < 160 ? text : "腾讯云没有完成本次生成，请稍后重试。";
+  if (/quota|exceeded|ZeroGPU|GPU quota/i.test(text)) return "今天的免费 GPU 额度可能已经用完，请在额度恢复后重试。";
+  if (/queue|busy|capacity|429/i.test(text)) return "当前免费 GPU 排队人数较多，请稍后重试。";
+  if (/cors|fetch|network|Failed to fetch/i.test(text)) return "暂时无法连接 Hugging Face AI 空间，请检查网络后重试。";
+  if (/HF_EMPTY_RESULT|HF_INCOMPLETE_RESULT|HF_GENERATION_FAILED/i.test(text)) return "模型没有返回完整图片，请更换清晰的正面全身照后重试。";
+  return text.length < 160 ? text : "开源 AI 模型没有完成本次生成，请稍后重试。";
 }
 
 function openDb() {
