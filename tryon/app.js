@@ -7,6 +7,7 @@ const DB_NAME = "tryon-local-v2";
 const DB_STORE = "assets";
 const AVATAR_API_BASE = "https://briaai-bria-rmbg-2-0.hf.space";
 const AVATAR_CPU_FALLBACK = "https://namelessai-rembg.hf.space";
+const AVATAR_GENERATOR_BASE = "https://kulkas2pintu-qwen-edit-image.hf.space";
 
 const state = {
   screen: "welcome",
@@ -18,6 +19,8 @@ const state = {
   onboarding: false,
   resumeTryOn: false,
   garmentType: "top",
+  garmentSubtype: "jacket",
+  garmentPhotoMode: "flat",
   productName: "短款翻领夹克",
   productSrc: "assets/garment-clean.webp",
   productOriginalSrc: "assets/garment-clean.webp",
@@ -83,6 +86,12 @@ const screenTitles = {
 };
 
 const garmentLabels = { top: "上衣", bottom: "下装", dress: "连体服" };
+const garmentSubtypes = {
+  top: [["knit", "毛衣 / 针织衫"], ["jacket", "外套 / 夹克"], ["shirt", "衬衫"], ["hoodie", "卫衣"], ["tshirt", "T恤 / 背心"], ["other-top", "其他上衣"]],
+  bottom: [["pants", "长裤"], ["skirt", "半身裙"], ["shorts", "短裤"], ["other-bottom", "其他下装"]],
+  dress: [["dress", "连衣裙"], ["jumpsuit", "连体裤"], ["other-dress", "其他连体服"]]
+};
+const garmentSubtypeLabel = key => Object.values(garmentSubtypes).flat().find(([value]) => value === key)?.[1] || "待确认款式";
 const icon = (name) => ({
   home: "⌂", tryon: "⌁", wardrobe: "◇", profile: "♙",
   upload: "▧", shirt: "♧", hanger: "⌁", closet: "▱"
@@ -246,8 +255,9 @@ function recognitionPage() {
     <button class="chip outline" data-action="recrop">重置</button>
   </div>
   <div class="recognition-card">
-    <div class="confidence"><b>✧ 商品区域确认</b><span>${state.cropApplied ? "已裁剪" : "待确认"}</span></div>
-    <div class="result-item"><img src="${state.productSrc}" alt="识别出的商品"><div><h4>${state.productName}</h4><div class="chips"><button class="chip">${garmentLabels[state.garmentType]}</button><button class="chip">夹克</button><button class="chip outline" data-action="edit-recognition">修改</button></div></div></div>
+    <div class="confidence"><b>✧ 商品区域与来源确认</b><span>${state.cropApplied ? "已裁剪" : "待确认"}</span></div>
+    <div class="result-item"><img src="${state.productSrc}" alt="识别出的商品"><div><h4>${state.productName}</h4><div class="chips"><span class="chip">${garmentLabels[state.garmentType]}</span><span class="chip">${garmentSubtypeLabel(state.garmentSubtype)}</span><button class="chip outline" data-action="edit-recognition">修改款式</button></div></div></div>
+    <div class="source-confirm"><b>图片中服装的呈现方式</b><div class="segment-control"><button class="${state.garmentPhotoMode === "worn" ? "active" : ""}" data-garment-photo-mode="worn">模特上身图</button><button class="${state.garmentPhotoMode === "flat" ? "active" : ""}" data-garment-photo-mode="flat">单件商品图</button></div><p>${state.garmentPhotoMode === "worn" ? "模型会先从人物身上提取所选服装，人物和包袋不会作为商品输入。" : "适用于平铺、挂拍或白底单件服装图。"}</p></div>
     <div class="button-row"><button class="ghost-btn" data-action="person-reselect-product">重新选择</button><button class="primary-btn" data-action="recognition-next">使用此裁剪 ›</button></div>
   </div>`;
 }
@@ -259,7 +269,8 @@ function categoryPage() {
     ${categoryCard("bottom", "♜", "下装")}
     ${categoryCard("dress", "♙", "连体服")}
   </div>
-  <div class="selected-product"><h3>已选择的商品</h3><div class="product-summary"><img src="${state.productSrc}" alt="${state.productName}"><div><h4>${state.productName}</h4><p>${garmentLabels[state.garmentType]}｜${state.productCleaned ? "背景已净化" : "已完成裁剪"}</p></div><span class="chev">›</span></div></div>
+  <div class="subtype-card"><b>确认具体款式</b><p>截图识别可能受模特、包袋和叠穿影响，请以商品本身为准。</p><div class="chips subtype-chips">${garmentSubtypes[state.garmentType].map(([key, label]) => `<button class="chip ${state.garmentSubtype === key ? "active" : ""}" data-garment-subtype="${key}">${label}</button>`).join("")}</div></div>
+  <div class="selected-product"><h3>已选择的商品</h3><div class="product-summary"><img src="${state.productSrc}" alt="${state.productName}"><div><h4>${state.productName}</h4><p>${garmentLabels[state.garmentType]}｜${state.productCleaned ? "背景已净化" : state.garmentPhotoMode === "worn" ? "将从模特图提取" : "已完成裁剪"}</p></div><span class="chev">›</span></div></div>
   <div class="sticky-actions"><button class="primary-btn full" data-action="category-next">下一步</button></div>`;
 }
 
@@ -335,7 +346,7 @@ async function beginAvatarGeneration() {
     if (num) num.textContent = `${state.avatarProgress}%`;
   }, 420);
   try {
-    state.personSrc = await createWhiteBackgroundAvatar(state.personOriginalSrc || state.personSrc);
+    state.personSrc = await createDigitalAvatar(state.personOriginalSrc || state.personSrc);
     state.avatarProgress = 100;
     const bar = $("#avatarProgressBar");
     const num = $("#avatarProgressNum");
@@ -357,14 +368,14 @@ async function beginAvatarGeneration() {
 }
 
 function avatarErrorPage() {
-  return `<div class="generation error-state"><div class="error-orbit">!</div><span class="micro-label">AVATAR GENERATION STOPPED</span><h2>白底数字形象<br>还没有生成成功</h2><p>${escapeHtml(state.avatarError || "AI 服务暂时不可用，请稍后重试。")}</p><div class="tips-card"><h4>本次不会保存原图冒充数字形象</h4><p>✓ 已依次尝试主通道与备用 CPU 通道</p><p>✓ 请保持当前页面打开并使用稳定 Wi-Fi</p><p>✓ 照片应完整包含头部到脚部</p>${state.avatarErrorRaw ? `<details><summary>查看错误代码</summary><code>${escapeHtml(state.avatarErrorRaw)}</code></details>` : ""}</div><div class="button-row"><button class="ghost-btn" data-action="person-reselect">更换照片</button><button class="primary-btn" data-action="retry-avatar">重新生成</button></div></div>`;
+  return `<div class="generation error-state"><div class="error-orbit">!</div><span class="micro-label">AVATAR GENERATION STOPPED</span><h2>正面数字形象<br>还没有生成成功</h2><p>${escapeHtml(state.avatarError || "AI 服务暂时不可用，请稍后重试。")}</p><div class="tips-card"><h4>本次不会把简单抠图冒充 AI 形象</h4><p>✓ 将使用生成式模型补全缺失身体并调整为正面站姿</p><p>✓ 请保持当前页面打开并使用稳定 Wi-Fi</p><p>✓ 面部越清晰，身份特征越稳定</p>${state.avatarErrorRaw ? `<details><summary>查看错误代码</summary><code>${escapeHtml(state.avatarErrorRaw)}</code></details>` : ""}</div><div class="button-row"><button class="ghost-btn" data-action="person-reselect">更换照片</button><button class="primary-btn" data-action="retry-avatar">重新生成</button></div></div>`;
 }
 
 function avatarResultPage() {
   const shapeName = { slim: "纤细", balanced: "匀称", curvy: "曲线", athletic: "健体" }[state.bodyShape];
   return `<div class="avatar-result">
     <div class="avatar-stage"><img src="${state.personSrc}" alt="我的个人AI全身形象"><span>MY DIGITAL SELF</span><button data-action="favorite-avatar">♡</button></div>
-    <div class="avatar-result-copy"><span class="success-pill">✓ 白底数字形象已生成</span><h2>你好，这是你的<br>数字试穿形象</h2><p>已完成单人裁剪与 AI 背景分离，可作为后续试穿的默认个人全身照。</p></div>
+    <div class="avatar-result-copy"><span class="success-pill">✓ 正面数字形象已生成</span><h2>你好，这是你的<br>数字试穿形象</h2><p>AI 已补全画面、调整为正面站姿并生成白底全身照；请确认人脸与身形后再用于试穿。</p></div>
     <div class="avatar-data-row"><span><b>${state.bodyData.height}</b> cm<small>身高</small></span><span><b>${state.bodyData.weight}</b> kg<small>体重</small></span><span><b>${shapeName}</b><small>身形</small></span></div>
     <div class="button-row"><button class="ghost-btn" data-action="avatar-adjust">调整数据</button><button class="primary-btn fashion-btn" data-action="avatar-use">使用此形象 ›</button></div>
     <button class="text-action" data-action="avatar-upload-photo">更换真人全身照</button>
@@ -373,7 +384,7 @@ function avatarResultPage() {
 
 function personUploadPage() {
   return `<div class="flow-steps" aria-label="个人形象建立步骤"><span class="active">1</span><i></i><span>2</span><i></i><span>3</span><small>上传照片</small><small>身体数据</small><small>完成形象</small></div>
-  <div class="page-intro"><span class="micro-label">FACE & BODY IDENTITY</span><h2>上传你的正面<br>清晰全身照</h2><p>试穿会直接以这张照片作为人物底图，尽量保留你的真实人脸、发型与身体轮廓。</p></div>
+  <div class="page-intro"><span class="micro-label">FACE & BODY IDENTITY</span><h2>上传一张<br>清晰个人照片</h2><p>AI 会补全缺失身体并调整为正面白底全身照；面部越清晰，身份特征越稳定。</p></div>
   <label class="upload-zone" for="personFile"><input class="sr-only" id="personFile" type="file" accept="image/*" data-file="person"><div><div class="big-icon">▧</div><h3>上传全身照</h3><p>支持 JPG、PNG，建议正面 3:4</p></div></label>
   <div class="option-list">
     <button class="option-row featured" data-action="demo-person"><span class="row-icon">✦</span><span><b>先用示例照片体验</b><small>仅用于查看流程，不会成为你的真人档案</small></span><span class="chev">›</span></button>
@@ -426,7 +437,8 @@ function confirmPage() {
     <div class="pair-card"><img src="${state.personSrc}" alt="个人数字形象"><b>个人形象</b><small>AI数字全身照</small></div>
   </div>
   <div class="setting-list">
-    <div class="setting-row"><span>♧</span><span>服装类型</span><b>${garmentLabels[state.garmentType]} ›</b></div>
+    <div class="setting-row"><span>♧</span><span>服装类型</span><b>${garmentSubtypeLabel(state.garmentSubtype)} ›</b></div>
+    <div class="setting-row"><span>▧</span><span>商品来源</span><b>${state.garmentPhotoMode === "worn" ? "模特上身图 · 自动提取" : "单件商品图"}</b></div>
     <button class="setting-row" data-action="avatar-adjust"><span>♙</span><span>身体数据</span><b>${state.bodyData.height} cm · ${state.bodyData.weight} kg ›</b></button>
     <button class="setting-row" data-action="style-pref"><span>♙</span><span>风格偏好</span><b>${state.stylePrefs.join(" · ") || "未设置"} ›</b></button>
     <div class="setting-row"><span>✧</span><span>生成预览</span><b>标准（1张） ›</b></div>
@@ -470,9 +482,9 @@ async function beginGeneration() {
   }, 650);
   try {
     const response = await callTryOnApi();
-    state.queueMessage = "正在保护人脸身份特征…";
+    state.queueMessage = "正在整理最终试穿结果…";
     updateGenerationStatus();
-    state.resultSrc = await protectIdentityFace(response.image, state.personSrc);
+    state.resultSrc = response.image;
     state.requestId = response.requestId || "";
     state.progress = 100;
     const bar = $("#progressBar");
@@ -491,7 +503,7 @@ async function beginGeneration() {
 }
 
 function generationErrorPage() {
-  return `<div class="generation error-state"><div class="error-orbit">!</div><span class="micro-label">GENERATION STOPPED</span><h2>这次没有生成成功</h2><p>${escapeHtml(state.generationError || "服务暂时不可用，请稍后重试。")}</p><div class="tips-card"><h4>你可以检查</h4><p>✓ 人物照片是否为正面清晰全身照</p><p>✓ 商品图是否只有一件正面服装</p><p>✓ 当前网络是否稳定</p>${state.requestId ? `<p>请求编号：${escapeHtml(state.requestId)}</p>` : ""}</div><div class="button-row"><button class="ghost-btn" data-action="back-to-confirm">返回检查</button><button class="primary-btn" data-action="retry-generate">重新生成</button></div></div>`;
+  return `<div class="generation error-state"><div class="error-orbit">!</div><span class="micro-label">GENERATION STOPPED</span><h2>这次没有生成成功</h2><p>${escapeHtml(state.generationError || "服务暂时不可用，请稍后重试。")}</p><div class="tips-card"><h4>你可以检查</h4><p>✓ 具体款式是否选择正确</p><p>✓ 商品来源是否选对“模特上身图 / 单件商品图”</p><p>✓ 免费额度是否已恢复、当前网络是否稳定</p>${state.requestId ? `<p>请求编号：${escapeHtml(state.requestId)}</p>` : ""}</div><div class="button-row"><button class="ghost-btn" data-action="back-to-confirm">返回检查</button><button class="primary-btn" data-action="retry-generate">重新生成</button></div></div>`;
 }
 
 function resultPage() {
@@ -610,7 +622,7 @@ function settingsPage() {
   <div class="settings-section"><h3>隐私与安全</h3><div class="menu-list"><button class="menu-item" data-action="privacy"><span>▣</span><b>隐私与授权</b><small>相机、相册、数据权限 ›</small></button><button class="menu-item" data-action="account"><span>◉</span><b>账号与安全</b><small>手机号、密码、登录管理 ›</small></button></div></div>
   <div class="settings-section"><h3>服务与帮助</h3><div class="menu-list"><button class="menu-item" data-action="help"><span>?</span><b>客服帮助</b><small>在线咨询 · 常见问题 ›</small></button></div></div>
   <button class="danger-btn" data-action="delete-all-data">删除本机全部个人数据</button>
-  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v1.7 双通道形象生成版</p>`;
+  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v2.0 正面形象与模特商品提取版</p>`;
 }
 
 function bindInputs() {
@@ -629,7 +641,10 @@ function bindInputs() {
           state.cropX = 0;
           state.cropY = 0;
           state.cropApplied = false;
-          state.productName = file.name.replace(/\.[^.]+$/, "").slice(0, 12) || "上传的服装";
+          state.garmentType = "top";
+          state.garmentSubtype = "";
+          state.garmentPhotoMode = "worn";
+          state.productName = "待确认商品款式";
           go("recognition");
         } else {
           state.personOriginalSrc = dataUrl;
@@ -956,6 +971,35 @@ async function compositeOnWhite(src) {
   return canvas.toDataURL("image/jpeg", 0.92);
 }
 
+async function createDigitalAvatar(source) {
+  if (!source) throw new Error("MISSING_PERSON_IMAGE");
+  const status = $("#avatarStatus");
+  if (status) status.textContent = "正在补全身体、调整正面站姿并保护人脸特征…";
+  const blob = await fetch(source).then(response => response.blob());
+  const uploaded = await uploadToGradio(AVATAR_GENERATOR_BASE, blob, "identity.jpg");
+  const shape = { slim: "slim", balanced: "balanced", curvy: "curvy", athletic: "athletic" }[state.bodyShape] || "balanced";
+  const prompt = [
+    "Create a photorealistic studio full-body photograph of the exact same person.",
+    "Turn the person to face the camera directly, standing straight in a neutral symmetrical pose with both arms slightly away from the torso.",
+    "Complete all missing or cropped body parts naturally from head to toe, including both hands, legs and feet.",
+    "Preserve the person's facial identity, facial proportions, skin tone, hairstyle and apparent age.",
+    `Use the supplied body profile as a visual guide: height ${state.bodyData.height} cm, weight ${state.bodyData.weight} kg, ${shape} body shape.`,
+    "Remove bags, handheld objects, posters, other people and background clutter.",
+    "Dress the person in a plain fitted neutral gray short-sleeve top and fitted black shorts suitable as a virtual try-on base.",
+    "Pure seamless white background, even soft studio lighting, realistic anatomy, natural hands, centered 3:4 composition, high detail."
+  ].join(" ");
+  const result = await callGradioDirect(
+    AVATAR_GENERATOR_BASE,
+    "edit",
+    [uploaded, prompt, "", null, 0, true, 1.5, 4, true, 88, 1280, true],
+    { timeout: 300000 }
+  );
+  let file = extractRemoteFile(Array.isArray(result) ? result[0] : result);
+  if (!file) throw new Error("AVATAR_GENERATIVE_EMPTY_RESULT");
+  if (!/^https?:|^data:/i.test(file)) file = `${AVATAR_GENERATOR_BASE}/gradio_api/file=${encodeURIComponent(file)}`;
+  return compositeOnWhite(file);
+}
+
 async function createWhiteBackgroundAvatar(source) {
   if (!source) throw new Error("MISSING_PERSON_IMAGE");
   const blob = await fetch(source).then(response => response.blob());
@@ -987,11 +1031,11 @@ async function createWhiteBackgroundAvatar(source) {
 
 function friendlyAvatarError(error) {
   const text = String(error?.message || error || "");
-  if (/AVATAR_ALL_BACKENDS_FAILED/i.test(text)) return "主通道和备用通道都暂时不可用，请稍后重新生成。";
-  if (error?.name === "AbortError" || /AVATAR_TIMEOUT/i.test(text)) return "免费 AI 抠图服务等待超时，请稍后重新生成。";
-  if (/HF_UPLOAD|Failed to fetch|network|fetch/i.test(text)) return "手机网络暂时无法连接白底形象服务，请切换 Wi-Fi 后重试。";
-  if (/quota|ZeroGPU|429|capacity|busy/i.test(text)) return "当前免费 GPU 额度或容量不足，请稍后重试。";
-  return text.length < 120 ? text : "白底数字形象服务暂时不可用，请稍后重试。";
+  if (error?.name === "AbortError" || /TIMEOUT/i.test(text)) return "正面形象生成等待超时，请稍后重新生成。";
+  if (/quota|ZeroGPU|429|capacity|busy/i.test(text)) return "今天的免费 GPU 额度可能已经用完，请在额度恢复后再生成正面数字形象。";
+  if (/HF_UPLOAD|Failed to fetch|network|fetch/i.test(text)) return "手机网络暂时无法连接生成式形象服务，请切换稳定 Wi-Fi 后重试。";
+  if (/HF_GENERATION_FAILED|AVATAR_GENERATIVE_EMPTY_RESULT/i.test(text)) return "生成式模型没有返回完整形象，请更换面部更清晰的照片后重试。";
+  return text.length < 120 ? text : "正面数字形象服务暂时不可用，请稍后重试。";
 }
 
 async function callTryOnApi() {
@@ -1003,6 +1047,11 @@ async function callTryOnApi() {
     state.requestId = requestId;
     const category = { top: "upper", bottom: "lower", dress: "dress" }[state.garmentType] || "upper";
     const base = CONFIG.apiBase.replace(/\/$/, "");
+    state.queueMessage = "正在检查免费试穿服务状态…";
+    updateGenerationStatus();
+    const healthResult = await callGradioDirect(base, "health", [], { timeout: 45000 });
+    const health = Array.isArray(healthResult) ? healthResult[0] : healthResult;
+    if (health && health.ready === false) throw new Error(health.error || "VTON_SERVICE_NOT_READY");
     const [personBlob, garmentBlob] = await Promise.all([
       fetch(state.personSrc).then(response => response.blob()),
       fetch(state.productSrc).then(response => response.blob())
@@ -1013,7 +1062,16 @@ async function callTryOnApi() {
       uploadToGradio(base, personBlob, "person.jpg"),
       uploadToGradio(base, garmentBlob, "garment.jpg")
     ]);
-    const result = await callGradioDirect(base, "tryon", [personFile, garmentFile, category, false, requestId, 24, 2.5, 42], {
+    state.queueMessage = "正在校验数字形象是否完整…";
+    updateGenerationStatus();
+    const validationResult = await callGradioDirect(base, "validate", [personFile], { timeout: 90000 });
+    const validation = Array.isArray(validationResult) ? validationResult[0] : validationResult;
+    if (validation && validation.usable === false) {
+      const error = new Error(validation.reason || validation.error_code || "NO_PERSON_DETECTED");
+      error.code = validation.error_code || "NO_PERSON_DETECTED";
+      throw error;
+    }
+    const result = await callGradioDirect(base, "tryon", [personFile, garmentFile, category, state.garmentPhotoMode === "worn", requestId, 20, 2.5, 42], {
       timeout: 240000,
       onEvent: event => {
         state.queueMessage = event === "pending" ? "请求已提交，正在等待免费 GPU…" : event === "generating" ? "GPU 已开始生成，请保持页面打开…" : "正在接收生成结果…";
@@ -1074,8 +1132,13 @@ function friendlyApiError(error) {
   if (error?.requestId) state.requestId = error.requestId;
   if (error?.name === "AbortError") return "免费 GPU 排队或生成超过 4 分钟，本次已自动停止。建议避开高峰期，或稍后重新尝试。";
   const text = String(error?.message || error || "");
+  const code = String(error?.code || "");
   if (text.includes("AI_BACKEND_NOT_CONFIGURED")) return "免费 AI 空间尚未绑定。完成 Hugging Face Space 部署后即可真实生成。";
   if (text.includes("MISSING_IMAGES")) return "缺少人物照或商品图，请返回重新上传。";
+  if (code === "NO_PERSON_DETECTED" || /NO_PERSON_DETECTED/i.test(text)) return "数字形象没有被识别为完整正面全身照，请重新生成人物形象后再试穿。";
+  if (code === "NO_GARMENT_FOUND" || /NO_GARMENT_FOUND/i.test(text)) return "没有从商品图中提取到所选服装，请检查具体款式以及“模特上身图 / 单件商品图”设置。";
+  if (code === "BAD_IMAGE" || /BAD_IMAGE/i.test(text)) return "人物图或商品图不符合模型输入要求，请返回重新裁剪。";
+  if (/VTON_SERVICE_NOT_READY/i.test(text)) return "免费试穿服务正在启动或维护，请稍后再试。";
   if (/Space metadata could not be loaded/i.test(text)) return "当前仍在使用旧版 AI 连接，请关闭页面后从最新链接重新打开。";
   if (/HF_UPLOAD/i.test(text)) return "图片上传到 AI 服务失败，请切换稳定 Wi-Fi 后重试。";
   if (/quota|exceeded|ZeroGPU|GPU quota/i.test(text)) return "今天的免费 GPU 额度可能已经用完，请在额度恢复后重试。";
@@ -1124,7 +1187,7 @@ async function dbDelete(key) {
 }
 
 async function saveProfile() {
-  const profile = { bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender, userName: state.userName, avatarVersion: 4, updatedAt: Date.now() };
+  const profile = { bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender, userName: state.userName, avatarVersion: 5, updatedAt: Date.now() };
   if (state.usingDemo) { state.profileReady = true; return; }
   localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
   if (state.personSrc) await dbSet("profileImage", state.personSrc);
@@ -1143,7 +1206,7 @@ async function saveCurrentRecord() {
     product: state.productSrc,
     productName: state.productName,
     type: state.garmentType,
-    typeLabel: garmentLabels[state.garmentType],
+    typeLabel: garmentSubtypeLabel(state.garmentSubtype),
     favorite: state.favorite,
     requestId: state.requestId,
     createdAt: Date.now()
@@ -1170,7 +1233,7 @@ async function loadAppData() {
     }
     state.personSrc = profileImage || "";
     state.personOriginalSrc = profileOriginalImage || profileImage || "";
-    state.profileReady = Boolean(profile && profileImage && profile.avatarVersion === 4);
+    state.profileReady = Boolean(profile && profileImage && profile.avatarVersion === 5);
     state.records = Array.isArray(records) ? records : [];
   } catch (error) {
     console.warn("Local profile could not be loaded", error);
@@ -1212,7 +1275,24 @@ document.addEventListener("click", event => {
     return;
   }
   const category = event.target.closest("[data-category]");
-  if (category) { state.garmentType = category.dataset.category; render(); return; }
+  if (category) {
+    state.garmentType = category.dataset.category;
+    if (!garmentSubtypes[state.garmentType].some(([key]) => key === state.garmentSubtype)) {
+      state.garmentSubtype = "";
+      state.productName = "待确认商品款式";
+    }
+    render();
+    return;
+  }
+  const subtype = event.target.closest("[data-garment-subtype]");
+  if (subtype) {
+    state.garmentSubtype = subtype.dataset.garmentSubtype;
+    state.productName = garmentSubtypeLabel(state.garmentSubtype);
+    render();
+    return;
+  }
+  const photoMode = event.target.closest("[data-garment-photo-mode]");
+  if (photoMode) { state.garmentPhotoMode = photoMode.dataset.garmentPhotoMode; render(); return; }
   const gender = event.target.closest("[data-gender]");
   if (gender) { state.gender = gender.dataset.gender; render(); return; }
   const shape = event.target.closest("[data-shape]");
@@ -1247,7 +1327,7 @@ document.addEventListener("click", event => {
     back,
     "start-flow": () => { if (state.profileReady) go("upload"); else { state.onboarding=true; state.resumeTryOn=true; go("personUpload"); } },
     "open-wardrobe": () => go("wardrobe"),
-    "demo-product": () => { state.productSrc="assets/garment-clean.webp"; state.productOriginalSrc=state.productSrc; state.cropZoom=1; state.cropX=0; state.cropY=0; state.cropApplied=false; state.productName="短款翻领夹克"; go("recognition"); },
+    "demo-product": () => { state.productSrc="assets/garment-clean.webp"; state.productOriginalSrc=state.productSrc; state.cropZoom=1; state.cropX=0; state.cropY=0; state.cropApplied=false; state.garmentType="top"; state.garmentSubtype="jacket"; state.garmentPhotoMode="flat"; state.productName="短款翻领夹克"; go("recognition"); },
     "history-product": () => openModal("历史商品", `<p>你的示例商品已保留。首版将支持按来源平台、类别和收藏状态筛选。</p><button class="option-row" data-action="demo-product"><span class="row-icon">♧</span><span><b>短款翻领夹克</b><small>上衣 · 示例商品</small></span><span class="chev">›</span></button>`),
     "recrop": () => { state.cropZoom=1; state.cropX=0; state.cropY=0; state.cropApplied=false; render(); toast("已重置裁剪区域"); },
     "person-reselect-product": () => go("upload"),
@@ -1256,21 +1336,26 @@ document.addEventListener("click", event => {
       if (state.productCleaning) return;
       state.productCleaning = true;
       trigger.disabled = true;
-      trigger.textContent = "AI 正在净化商品图…";
+      trigger.textContent = state.garmentPhotoMode === "worn" ? "正在准备模特商品图…" : "AI 正在净化商品图…";
       try {
         await applyProductCrop();
-        try {
-          state.productSrc = await createWhiteBackgroundAvatar(state.productSrc);
-          state.productCleaned = true;
-        } catch (cleanError) {
+        if (state.garmentPhotoMode === "flat") {
+          try {
+            state.productSrc = await createWhiteBackgroundAvatar(state.productSrc);
+            state.productCleaned = true;
+          } catch (cleanError) {
+            state.productCleaned = false;
+          }
+        } else {
           state.productCleaned = false;
         }
         go("category");
       } catch (error) { toast("裁剪失败，请重新选择图片"); }
       finally { state.productCleaning = false; }
     },
-    "category-next": () => { if (state.profileReady) go("confirm"); else { state.resumeTryOn=true; go("personUpload"); } },
+    "category-next": () => { if (!state.garmentSubtype) return toast("请先确认毛衣、夹克等具体款式"); if (state.profileReady) go("confirm"); else { state.resumeTryOn=true; go("personUpload"); } },
     "generate-avatar": () => {
+      if (!state.consent) return openModal("需要图片处理授权", `<p>生成正面数字形象需要把你选择的个人照片发送至 Hugging Face 公共生成式图像模型。请先查看并允许。</p>`, `<button class="primary-btn full" data-action="privacy">查看并授权</button>`);
       if (!state.bodyData.height || !state.bodyData.weight) return toast("请先填写身高和体重");
       if (!state.personSrc) return toast("请先上传一张正面全身照");
       state.avatarProgress = 0;
@@ -1299,7 +1384,7 @@ document.addEventListener("click", event => {
     "smart-style": () => openModal("智能搭配", `<p>根据你当前选择的米白上衣，推荐轻酷叠穿、奶油柔光与先锋极简三种方向。</p><div class="look-row">${lookCard("assets/inspire-urban-v2.webp","轻酷叠穿","look-urban")}${lookCard("assets/inspire-soft-v2.webp","奶油柔光","look-soft")}${lookCard("assets/inspire-cool-v2.webp","先锋极简","look-cool")}</div>`),
     settings: () => go("settings"),
     "body-profile": () => go("bodyData"),
-    privacy: () => openModal("照片用途与隐私", `<p><b>本机保存：</b>白底数字形象、身体数据和试穿记录保存在当前手机浏览器中。</p><p><b>AI 处理：</b>点击生成数字形象时，原始全身照会发送至 Hugging Face 公共 ZeroGPU 抠图模型；点击开始试穿时，数字形象与商品图会发送至公共试穿模型。图片用于当次临时推理，不上传腾讯云 COS，也不会加入本应用的永久云端相册。请勿上传身份证件或其他敏感照片。</p><p><b>你的控制：</b>可在设置中删除照片、记录或全部本机个人数据。</p><button class="consent-row" data-action="toggle-consent"><span>${state.consent ? "✓" : ""}</span><b>允许在点击生成时发送图片至 AI 服务</b></button>`),
+    privacy: () => openModal("照片用途与隐私", `<p><b>本机保存：</b>数字形象、身体数据和试穿记录保存在当前手机浏览器中。</p><p><b>AI 处理：</b>点击生成数字形象时，个人照片会发送至 Hugging Face 公共生成式图像模型，用于补全身体、调整正面站姿和生成白底形象；点击开始试穿时，数字形象与商品图会发送至公共试穿模型。图片用于当次临时推理，不上传腾讯云 COS，也不会加入本应用的永久云端相册。请勿上传身份证件或其他敏感照片。</p><p><b>你的控制：</b>可在设置中删除照片、记录或全部本机个人数据。</p><button class="consent-row" data-action="toggle-consent"><span>${state.consent ? "✓" : ""}</span><b>允许在点击生成时发送图片至 AI 服务</b></button>`),
     "style-pref": () => go("stylePrefs"),
     "toggle-pref": () => { const value=trigger.dataset.value; state.stylePrefs = state.stylePrefs.includes(value) ? state.stylePrefs.filter(x=>x!==value) : state.stylePrefs.length<4 ? [...state.stylePrefs,value] : state.stylePrefs; closeModal(); actions["style-pref"](); },
     "save-prefs": () => { savePreferences(); closeModal(); render(); toast("风格偏好已保存"); },
@@ -1309,7 +1394,7 @@ document.addEventListener("click", event => {
     "delete-photo": () => openModal("删除个人照片？", `<p>删除后，现有试穿记录仍会保留，但再次生成前必须上传新的全身照。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="confirm-delete-photo">确认删除</button></div>`),
     "confirm-delete-photo": async () => { await Promise.all([dbDelete("profileImage"),dbDelete("profileOriginalImage")]); localStorage.removeItem(PROFILE_KEY); state.personSrc=""; state.personOriginalSrc=""; state.profileReady=false; closeModal(); render(); toast("个人照片已删除"); },
     more: () => openModal("更多操作", `<div class="option-list"><button class="option-row" data-action="privacy"><span class="row-icon">▣</span><span><b>隐私说明</b></span><span class="chev">›</span></button><button class="option-row" data-action="help"><span class="row-icon">?</span><span><b>使用帮助</b></span><span class="chev">›</span></button></div>`),
-    help: () => openModal("使用帮助", `<p><b>首次使用：</b>上传正面清晰全身照 → 确认照片 → 填写身体数据 → 建立个人形象。</p><p><b>试穿：</b>上传商品正面平铺图 → 选择服装类型 → 确认人物形象 → 调用 Hugging Face ZeroGPU 真实生成。</p><p><b>效果建议：</b>人物照建议 3:4、正面无遮挡；商品图只保留一件上衣、下装或连衣裙。</p>`),
+    help: () => openModal("使用帮助", `<p><b>首次使用：</b>上传面部清晰的个人照片 → 填写身体数据 → AI 补全并生成正面白底全身形象。</p><p><b>试穿：</b>上传商品图 → 确认“模特上身图 / 单件商品图” → 选择毛衣、夹克等具体款式 → 调用 Hugging Face ZeroGPU 真实生成。</p><p><b>效果建议：</b>人物照尽量无遮挡；商品图应能清楚看见服装完整轮廓，避免多人和复杂叠穿。</p>`),
     message: () => openModal("消息通知", `<div class="empty-state small"><span>♧</span><h3>暂无新消息</h3><p>生成完成、服务状态与隐私更新会显示在这里。</p></div>`),
     upgrade: () => openModal("AI 服务说明", `<p>当前版本使用 Hugging Face ZeroGPU 的开源试穿模型，不收取费用；匿名用户每天有少量 GPU 额度，高峰期可能排队。</p>`),
     manage: () => openModal("管理试穿记录", `<p>当前共有 <b>${state.records.length}</b> 条本机记录。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="clear-records">全部清理</button></div>`),
