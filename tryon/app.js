@@ -8,6 +8,11 @@ const DB_STORE = "assets";
 const AVATAR_API_BASE = "https://briaai-bria-rmbg-2-0.hf.space";
 const AVATAR_CPU_FALLBACK = "https://namelessai-rembg.hf.space";
 const AVATAR_GENERATOR_BASE = "https://kulkas2pintu-qwen-edit-image.hf.space";
+const HF_OAUTH_CLIENT_ID = "https://u2zqev.com.cn/.well-known/oauth-cimd";
+const HF_OAUTH_REDIRECT = "https://u2zqev.com.cn/tryon/";
+const HF_OAUTH_SCOPES = "openid profile inference-api";
+const HF_AUTH_SESSION_KEY = "tryon-hf-auth-v1";
+const HF_AUTH_DRAFT_KEY = "tryon-hf-auth-draft-v1";
 
 const state = {
   screen: "welcome",
@@ -49,6 +54,11 @@ const state = {
   queueEta: null,
   progress: 0,
   avatarProgress: 0,
+  avatarFingerprint: "",
+  hfToken: "",
+  hfTokenExpiresAt: 0,
+  hfUser: null,
+  authError: "",
   gender: "female",
   bodyShape: "balanced",
   bodyData: { height: "165", weight: "50", shoulder: "38", chest: "82", waist: "64", hip: "88" },
@@ -187,6 +197,7 @@ function render() {
 }
 
 function welcomePage() {
+  const hfName = state.hfUser?.preferred_username || state.hfUser?.name || "";
   return `<div class="splash">
     <div class="splash-brand">TRY ON｜试一试</div>
     <div class="splash-copy">
@@ -196,6 +207,7 @@ function welcomePage() {
     </div>
     <img class="splash-model" src="assets/hero-young-v2.webp" alt="年轻时尚的AI试穿示例模特">
     <button class="primary-btn full" data-action="start">${state.profileReady ? "进入我的试穿空间" : "上传全身照，建立个人形象"} <span>›</span></button>
+    ${state.hfToken ? `<div class="hf-welcome-status"><span>✓</span><b>${escapeHtml(hfName || "Hugging Face 免费账号")}</b><small>已使用免费账号额度</small></div>` : `<button class="hf-login-entry" data-action="hf-login"><b>◉ 免费账号登录</b><small>匿名约 2 分钟 → 免费账号约 5 分钟 GPU / 24小时</small></button>`}
   </div>`;
 }
 
@@ -346,7 +358,18 @@ async function beginAvatarGeneration() {
     if (num) num.textContent = `${state.avatarProgress}%`;
   }, 420);
   try {
-    state.personSrc = await createDigitalAvatar(state.personOriginalSrc || state.personSrc);
+    const source = state.personOriginalSrc || state.personSrc;
+    const expectedFingerprint = await computeAvatarFingerprint(source);
+    if (state.profileReady && state.avatarFingerprint === expectedFingerprint && state.personSrc) {
+      const status = $("#avatarStatus");
+      if (status) status.textContent = "照片与身体数据没有变化，正在读取已缓存的数字形象…";
+      state.avatarProgress = 100;
+      await delay(350);
+      if (state.screen === "avatarGenerating") go("avatarResult", { replace: true });
+      return;
+    }
+    state.personSrc = await createDigitalAvatar(source);
+    state.avatarFingerprint = expectedFingerprint;
     state.avatarProgress = 100;
     const bar = $("#avatarProgressBar");
     const num = $("#avatarProgressNum");
@@ -598,8 +621,10 @@ function stylePrefsPage() {
 
 function profilePage() {
   const avatar = state.personSrc || "assets/hero-young-v2.webp";
-  return `<div class="profile-head"><img class="avatar" src="${avatar}" alt="我的头像"><div><h2>${escapeHtml(state.userName)} <span class="vip">本机体验版</span></h2><p>${state.profileReady ? "个人 AI 形象已建立" : "请先建立个人 AI 形象"}</p></div><button class="icon-btn" data-action="settings">›</button></div>
-  <div class="member-card"><div class="top"><h3>✦ 我的数字形象</h3><button data-action="photo-archive">${state.profileReady ? "管理形象" : "立即建立"} ›</button></div><div class="quota"><div><span>保存的试穿</span><b>${state.records.length} 次</b></div><div><span>AI 服务</span><b>${CONFIG.apiBase ? "AI 已连接" : "等待连接"}</b></div></div></div>
+  const hfName = state.hfUser?.preferred_username || state.hfUser?.name || "";
+  return `<div class="profile-head"><img class="avatar" src="${avatar}" alt="我的头像"><div><h2>${escapeHtml(state.userName)} <span class="vip">${state.hfToken ? "免费账号" : "游客"}</span></h2><p>${state.profileReady ? "个人 AI 形象已建立" : "请先建立个人 AI 形象"}</p></div><button class="icon-btn" data-action="settings">›</button></div>
+  <div class="hf-auth-card ${state.hfToken ? "connected" : ""}"><div><span class="hf-mark">HF</span><p><b>${state.hfToken ? escapeHtml(hfName || "Hugging Face 已登录") : "登录免费 Hugging Face 账号"}</b><small>${state.hfToken ? "约 5 分钟 GPU / 24小时 · 中等排队优先级" : "游客约 2 分钟，登录后提升至约 5 分钟"}</small></p></div><button data-action="${state.hfToken ? "hf-logout" : "hf-login"}">${state.hfToken ? "退出" : "免费登录"}</button></div>
+  <div class="member-card"><div class="top"><h3>✦ 我的数字形象</h3><button data-action="photo-archive">${state.profileReady ? "管理形象" : "立即建立"} ›</button></div><div class="quota"><div><span>保存的试穿</span><b>${state.records.length} 次</b></div><div><span>AI 服务</span><b>${state.hfToken ? "免费账号额度" : CONFIG.apiBase ? "游客额度" : "等待连接"}</b></div></div></div>
   <div class="profile-stats">
     <button class="stat-card" data-action="open-wardrobe"><b>${state.records.filter(x=>x.favorite).length}</b><span>我的收藏</span></button>
     <button class="stat-card" data-action="style-pref"><b>${state.stylePrefs.length}</b><span>风格偏好</span></button>
@@ -619,6 +644,7 @@ function profilePage() {
 
 function settingsPage() {
   return `<div class="settings-section"><h3>照片与试穿记录</h3><div class="menu-list"><button class="menu-item" data-action="photo-archive"><span>▧</span><b>照片管理</b><small>${state.profileReady ? "共 1 张" : "暂无照片"} ›</small></button><button class="menu-item" data-action="clear-records"><span>♜</span><b>删除试穿记录</b><small>${state.records.length} 条，可批量清理 ›</small></button></div></div>
+  <div class="settings-section"><h3>免费 AI 账号</h3><div class="menu-list"><button class="menu-item" data-action="${state.hfToken ? "hf-logout" : "hf-login"}"><span>HF</span><b>${state.hfToken ? "Hugging Face 已登录" : "登录 Hugging Face"}</b><small>${state.hfToken ? "免费账号额度 · 退出 ›" : "提升免费生成额度 ›"}</small></button></div></div>
   <div class="settings-section"><h3>隐私与安全</h3><div class="menu-list"><button class="menu-item" data-action="privacy"><span>▣</span><b>隐私与授权</b><small>相机、相册、数据权限 ›</small></button><button class="menu-item" data-action="account"><span>◉</span><b>账号与安全</b><small>手机号、密码、登录管理 ›</small></button></div></div>
   <div class="settings-section"><h3>服务与帮助</h3><div class="menu-list"><button class="menu-item" data-action="help"><span>?</span><b>客服帮助</b><small>在线咨询 · 常见问题 ›</small></button></div></div>
   <button class="danger-btn" data-action="delete-all-data">删除本机全部个人数据</button>
@@ -735,6 +761,155 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[char]));
 }
 
+function base64Url(bytes) {
+  return btoa(String.fromCharCode(...new Uint8Array(bytes)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function randomOauthValue(size = 32) {
+  const bytes = new Uint8Array(size);
+  crypto.getRandomValues(bytes);
+  return base64Url(bytes);
+}
+
+function restoreHfSession() {
+  try {
+    const auth = JSON.parse(sessionStorage.getItem(HF_AUTH_SESSION_KEY) || "null");
+    if (!auth?.accessToken || Number(auth.expiresAt || 0) <= Date.now() + 30000) {
+      sessionStorage.removeItem(HF_AUTH_SESSION_KEY);
+      return;
+    }
+    state.hfToken = auth.accessToken;
+    state.hfTokenExpiresAt = Number(auth.expiresAt || 0);
+    state.hfUser = auth.userInfo || null;
+  } catch (error) {
+    sessionStorage.removeItem(HF_AUTH_SESSION_KEY);
+  }
+}
+
+function hfAuthHeaders(base, extra = {}) {
+  const headers = { ...extra };
+  if (!state.hfToken) return headers;
+  try {
+    const host = new URL(base, location.href).hostname;
+    if (host === "huggingface.co" || host.endsWith(".hf.space")) {
+      headers.Authorization = `Bearer ${state.hfToken}`;
+    }
+  } catch (error) {}
+  return headers;
+}
+
+async function saveHfLoginDraft() {
+  const draft = {
+    bodyData: state.bodyData,
+    bodyShape: state.bodyShape,
+    gender: state.gender,
+    resumeTryOn: state.resumeTryOn,
+    hasPerson: Boolean(state.personOriginalSrc || state.personSrc),
+    updatedAt: Date.now()
+  };
+  localStorage.setItem(HF_AUTH_DRAFT_KEY, JSON.stringify(draft));
+  if (draft.hasPerson) await dbSet("hfAuthDraftPerson", state.personOriginalSrc || state.personSrc);
+}
+
+async function restoreHfLoginDraft() {
+  try {
+    const draft = JSON.parse(localStorage.getItem(HF_AUTH_DRAFT_KEY) || "null");
+    if (!draft || Date.now() - Number(draft.updatedAt || 0) > 60 * 60 * 1000) return;
+    state.bodyData = { ...state.bodyData, ...(draft.bodyData || {}) };
+    state.bodyShape = draft.bodyShape || state.bodyShape;
+    state.gender = draft.gender || state.gender;
+    state.resumeTryOn = Boolean(draft.resumeTryOn);
+    const person = await dbGet("hfAuthDraftPerson");
+    if (person && !state.profileReady) {
+      state.personOriginalSrc = person;
+      state.personSrc = person;
+      state.singlePersonConfirmed = true;
+      state.screen = "bodyData";
+      state.onboarding = true;
+    }
+    localStorage.removeItem(HF_AUTH_DRAFT_KEY);
+    await dbDelete("hfAuthDraftPerson");
+  } catch (error) {
+    console.warn("HF login draft could not be restored", error);
+  }
+}
+
+async function beginHfLogin() {
+  await saveHfLoginDraft();
+  const verifier = randomOauthValue(64);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  const oauthState = randomOauthValue(24);
+  sessionStorage.setItem("tryon-hf-code-verifier", verifier);
+  sessionStorage.setItem("tryon-hf-oauth-state", oauthState);
+  const params = new URLSearchParams({
+    client_id: HF_OAUTH_CLIENT_ID,
+    redirect_uri: HF_OAUTH_REDIRECT,
+    response_type: "code",
+    scope: HF_OAUTH_SCOPES,
+    state: oauthState,
+    code_challenge: base64Url(digest),
+    code_challenge_method: "S256"
+  });
+  location.href = `https://huggingface.co/oauth/authorize?${params}`;
+}
+
+async function completeHfLoginIfPresent() {
+  restoreHfSession();
+  const params = new URLSearchParams(location.search);
+  const code = params.get("code");
+  const returnedState = params.get("state");
+  const oauthError = params.get("error");
+  if (oauthError) {
+    state.authError = params.get("error_description") || "Hugging Face 登录没有完成";
+    history.replaceState(null, "", `${location.pathname}?v=20261115-fix10`);
+    return;
+  }
+  if (!code) return;
+  const expectedState = sessionStorage.getItem("tryon-hf-oauth-state");
+  const verifier = sessionStorage.getItem("tryon-hf-code-verifier");
+  if (!expectedState || returnedState !== expectedState || !verifier) throw new Error("HF_OAUTH_STATE_INVALID");
+  const body = new URLSearchParams({
+    client_id: HF_OAUTH_CLIENT_ID,
+    code,
+    grant_type: "authorization_code",
+    redirect_uri: HF_OAUTH_REDIRECT,
+    code_verifier: verifier
+  });
+  const tokenResponse = await fetch("https://huggingface.co/oauth/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body
+  });
+  const token = await tokenResponse.json().catch(() => ({}));
+  if (!tokenResponse.ok || !token.access_token) throw new Error(token.error_description || token.error || `HF_OAUTH_${tokenResponse.status}`);
+  const userResponse = await fetch("https://huggingface.co/oauth/userinfo", {
+    headers: { Authorization: `Bearer ${token.access_token}` }
+  });
+  const userInfo = userResponse.ok ? await userResponse.json() : null;
+  const expiresAt = Date.now() + Math.max(300, Number(token.expires_in || 28800)) * 1000;
+  sessionStorage.setItem(HF_AUTH_SESSION_KEY, JSON.stringify({ accessToken: token.access_token, expiresAt, userInfo }));
+  sessionStorage.removeItem("tryon-hf-code-verifier");
+  sessionStorage.removeItem("tryon-hf-oauth-state");
+  state.hfToken = token.access_token;
+  state.hfTokenExpiresAt = expiresAt;
+  state.hfUser = userInfo;
+  history.replaceState(null, "", `${location.pathname}?v=20261115-fix10`);
+}
+
+function logoutHf() {
+  sessionStorage.removeItem(HF_AUTH_SESSION_KEY);
+  state.hfToken = "";
+  state.hfTokenExpiresAt = 0;
+  state.hfUser = null;
+}
+
+async function computeAvatarFingerprint(source) {
+  const profile = JSON.stringify({ source, bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender });
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(profile));
+  return base64Url(digest);
+}
+
 function processImageFile(file) {
   return new Promise((resolve, reject) => {
     if (file.size > 18 * 1024 * 1024) return reject(new Error("图片超过 18MB，请先压缩后上传"));
@@ -768,7 +943,11 @@ async function uploadToGradio(base, blob, filename) {
   const form = new FormData();
   const file = new File([blob], filename, { type: blob.type || "image/jpeg" });
   form.append("files", file);
-  const response = await fetch(`${base.replace(/\/$/, "")}/gradio_api/upload`, { method: "POST", body: form });
+  const response = await fetch(`${base.replace(/\/$/, "")}/gradio_api/upload`, {
+    method: "POST",
+    headers: hfAuthHeaders(base),
+    body: form
+  });
   if (!response.ok) throw new Error(`HF_UPLOAD_${response.status}`);
   const uploaded = await response.json();
   if (!Array.isArray(uploaded) || !uploaded[0]) throw new Error("HF_UPLOAD_EMPTY");
@@ -796,7 +975,7 @@ async function callGradioDirect(base, endpoint, data, options = {}) {
   try {
     const startResponse = await fetch(`${cleanBase}/gradio_api/call/${endpoint}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: hfAuthHeaders(cleanBase, { "Content-Type": "application/json" }),
       body: JSON.stringify({ data }),
       signal: controller.signal
     });
@@ -808,7 +987,7 @@ async function callGradioDirect(base, endpoint, data, options = {}) {
     state.requestId = started.event_id;
     options.onEvent?.("pending", null);
     const resultResponse = await fetch(`${cleanBase}/gradio_api/call/${endpoint}/${encodeURIComponent(started.event_id)}`, {
-      headers: { Accept: "text/event-stream" }, signal: controller.signal
+      headers: hfAuthHeaders(cleanBase, { Accept: "text/event-stream" }), signal: controller.signal
     });
     if (!resultResponse.ok) throw new Error(`HF_RESULT_${resultResponse.status}`);
     const reader = resultResponse.body?.getReader();
@@ -1001,9 +1180,9 @@ async function createDigitalAvatar(source) {
   const result = await callGradioDirect(
     AVATAR_GENERATOR_BASE,
     "edit",
-    // The live /edit schema currently contains 13 positional parameters.
-    // lock_face_hair was appended after fix_hands; omitting it now returns HTTP 422.
-    [uploaded, prompt, "", null, 0, true, 1.5, 4, true, 88, 1280, true, true],
+    // Quota-saving mode: native 4-step inference at 1024px, one result only.
+    // Face/hair locking remains enabled so identity stability is not traded away.
+    [uploaded, prompt, "", null, 0, true, 1.0, 4, true, 90, 1024, false, true],
     { timeout: 300000 }
   );
   let file = extractRemoteFile(Array.isArray(result) ? result[0] : result);
@@ -1084,7 +1263,7 @@ async function callTryOnApi() {
       error.code = validation.error_code || "NO_PERSON_DETECTED";
       throw error;
     }
-    const result = await callGradioDirect(base, "tryon", [personFile, garmentFile, category, state.garmentPhotoMode === "worn", requestId, 20, 2.5, 42], {
+    const result = await callGradioDirect(base, "tryon", [personFile, garmentFile, category, state.garmentPhotoMode === "worn", requestId, 16, 2.2, 42], {
       timeout: 240000,
       onEvent: event => {
         state.queueMessage = event === "pending" ? "请求已提交，正在等待免费 GPU…" : event === "generating" ? "GPU 已开始生成，请保持页面打开…" : "正在接收生成结果…";
@@ -1108,7 +1287,7 @@ async function callTryOnApi() {
   try {
     const startResponse = await fetch(`${base}/gradio_api/call/try_on`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: hfAuthHeaders(base, { "Content-Type": "application/json" }),
       body: JSON.stringify({ data: [state.personSrc, state.productSrc, garmentType, 30, 2.5, -1] }),
       signal: controller.signal
     });
@@ -1119,7 +1298,7 @@ async function callTryOnApi() {
     state.requestId = started.event_id;
     const resultResponse = await fetch(
       `${base}/gradio_api/call/try_on/${encodeURIComponent(started.event_id)}`,
-      { headers: { Accept: "text/event-stream" }, signal: controller.signal }
+      { headers: hfAuthHeaders(base, { Accept: "text/event-stream" }), signal: controller.signal }
     );
     const eventText = await resultResponse.text();
     if (!resultResponse.ok) throw new Error(`HF_RESULT_${resultResponse.status}`);
@@ -1200,7 +1379,7 @@ async function dbDelete(key) {
 }
 
 async function saveProfile() {
-  const profile = { bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender, userName: state.userName, avatarVersion: 5, updatedAt: Date.now() };
+  const profile = { bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender, userName: state.userName, avatarFingerprint: state.avatarFingerprint, avatarVersion: 5, updatedAt: Date.now() };
   if (state.usingDemo) { state.profileReady = true; return; }
   localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
   if (state.personSrc) await dbSet("profileImage", state.personSrc);
@@ -1239,6 +1418,7 @@ async function loadAppData() {
       state.bodyShape = profile.bodyShape || state.bodyShape;
       state.gender = profile.gender || state.gender;
       state.userName = profile.userName || state.userName;
+      state.avatarFingerprint = profile.avatarFingerprint || "";
     }
     if (prefs) {
       state.stylePrefs = Array.isArray(prefs.stylePrefs) ? prefs.stylePrefs : state.stylePrefs;
@@ -1279,6 +1459,16 @@ function openModal(title, body, actions = "") {
 }
 
 function closeModal() { $("#modalRoot").innerHTML = ""; }
+
+function openFreeAccountModal(kind) {
+  const isAvatar = kind === "avatar";
+  openModal(
+    "登录后免费额度更多",
+    `<div class="quota-login-copy"><div><b>游客模式</b><span>约 2 分钟 GPU / 24小时</span></div><i>→</i><div class="better"><b>免费账号</b><span>约 5 分钟 GPU / 24小时</span></div></div>
+    <p>登录使用 Hugging Face 官方授权，不需要付费。登录信息只保存在当前浏览器会话中，不会写入网页代码；你也可以继续使用游客额度。</p>`,
+    `<div class="button-row"><button class="ghost-btn" data-action="${isAvatar ? "continue-avatar-guest" : "continue-tryon-guest"}">游客继续</button><button class="primary-btn" data-action="hf-login">免费登录</button></div>`
+  );
+}
 
 document.addEventListener("click", event => {
   const tab = event.target.closest("[data-tab]");
@@ -1371,9 +1561,11 @@ document.addEventListener("click", event => {
       if (!state.consent) return openModal("需要图片处理授权", `<p>生成正面数字形象需要把你选择的个人照片发送至 Hugging Face 公共生成式图像模型。请先查看并允许。</p>`, `<button class="primary-btn full" data-action="privacy">查看并授权</button>`);
       if (!state.bodyData.height || !state.bodyData.weight) return toast("请先填写身高和体重");
       if (!state.personSrc) return toast("请先上传一张正面全身照");
+      if (!state.hfToken) return openFreeAccountModal("avatar");
       state.avatarProgress = 0;
       go("avatarGenerating");
     },
+    "continue-avatar-guest": () => { closeModal(); state.avatarProgress=0; go("avatarGenerating"); },
     "avatar-adjust": () => { state.resumeTryOn = state.screen === "confirm"; go("bodyData"); },
     "avatar-use": () => { state.onboarding=false; if (state.resumeTryOn) { state.resumeTryOn=false; go("confirm"); } else go("home"); },
     "avatar-upload-photo": () => { state.resumeTryOn=false; go("personUpload"); },
@@ -1386,7 +1578,10 @@ document.addEventListener("click", event => {
     "back-to-person-crop": () => go("personCrop"),
     "toggle-single-person": () => { state.singlePersonConfirmed=!state.singlePersonConfirmed; render(); },
     "photo-next": () => { if (!state.singlePersonConfirmed) return toast("请先确认画面中只有你本人一张脸"); go("bodyData"); },
-    generate: () => { if (!state.consent) return openModal("需要图片处理授权", `<p>只有在你主动点击生成时，人物照和商品图才会发送至 AI 服务进行本次换装。请先在隐私设置中允许。</p>`, `<button class="primary-btn full" data-action="privacy">查看并授权</button>`); state.progress=0; state.generationError=""; go("generating"); },
+    generate: () => { if (!state.consent) return openModal("需要图片处理授权", `<p>只有在你主动点击生成时，人物照和商品图才会发送至 AI 服务进行本次换装。请先在隐私设置中允许。</p>`, `<button class="primary-btn full" data-action="privacy">查看并授权</button>`); if (!state.hfToken) return openFreeAccountModal("tryon"); state.progress=0; state.generationError=""; go("generating"); },
+    "continue-tryon-guest": () => { closeModal(); state.progress=0; state.generationError=""; go("generating"); },
+    "hf-login": () => { closeModal(); beginHfLogin().catch(error => { state.authError=error.message || "登录暂时不可用"; toast(state.authError); }); },
+    "hf-logout": () => { logoutHf(); render(); toast("已退出 Hugging Face 免费账号"); },
     favorite: () => { state.favorite=!state.favorite; render(); toast(state.favorite ? "已收藏" : "已取消收藏"); },
     download: () => { const a=document.createElement("a"); a.href=state.resultSrc; a.download="TRY-ON-试穿预览.webp"; a.click(); toast("已开始下载预览图"); },
     compare: () => go("compare"),
@@ -1405,7 +1600,7 @@ document.addEventListener("click", event => {
     "photo-archive": () => state.profileReady ? openModal("个人照片档案", `<div class="selected-photo"><img src="${state.personSrc}" alt="个人照片"><div><b>默认个人全身照</b><p>✓ 已保存在本机，可重复试穿</p></div></div><p>上传新的照片会替换当前默认形象；删除后再次试穿前需要重新建档。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="delete-photo">删除照片</button><button class="primary-btn" data-action="replace-photo">更换照片</button></div>`) : openModal("个人照片档案", `<div class="empty-state small"><span>▧</span><p>还没有个人全身照</p></div>`, `<button class="primary-btn full" data-action="replace-photo">上传并建立形象</button>`),
     "replace-photo": () => { closeModal(); state.resumeTryOn=false; go("personUpload"); },
     "delete-photo": () => openModal("删除个人照片？", `<p>删除后，现有试穿记录仍会保留，但再次生成前必须上传新的全身照。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="confirm-delete-photo">确认删除</button></div>`),
-    "confirm-delete-photo": async () => { await Promise.all([dbDelete("profileImage"),dbDelete("profileOriginalImage")]); localStorage.removeItem(PROFILE_KEY); state.personSrc=""; state.personOriginalSrc=""; state.profileReady=false; closeModal(); render(); toast("个人照片已删除"); },
+    "confirm-delete-photo": async () => { await Promise.all([dbDelete("profileImage"),dbDelete("profileOriginalImage")]); localStorage.removeItem(PROFILE_KEY); state.personSrc=""; state.personOriginalSrc=""; state.avatarFingerprint=""; state.profileReady=false; closeModal(); render(); toast("个人照片已删除"); },
     more: () => openModal("更多操作", `<div class="option-list"><button class="option-row" data-action="privacy"><span class="row-icon">▣</span><span><b>隐私说明</b></span><span class="chev">›</span></button><button class="option-row" data-action="help"><span class="row-icon">?</span><span><b>使用帮助</b></span><span class="chev">›</span></button></div>`),
     help: () => openModal("使用帮助", `<p><b>首次使用：</b>上传面部清晰的个人照片 → 填写身体数据 → AI 补全并生成正面白底全身形象。</p><p><b>试穿：</b>上传商品图 → 确认“模特上身图 / 单件商品图” → 选择毛衣、夹克等具体款式 → 调用 Hugging Face ZeroGPU 真实生成。</p><p><b>效果建议：</b>人物照尽量无遮挡；商品图应能清楚看见服装完整轮廓，避免多人和复杂叠穿。</p>`),
     message: () => openModal("消息通知", `<div class="empty-state small"><span>♧</span><h3>暂无新消息</h3><p>生成完成、服务状态与隐私更新会显示在这里。</p></div>`),
@@ -1415,7 +1610,7 @@ document.addEventListener("click", event => {
     "clear-records": () => openModal("删除试穿记录", `<p>确认后将永久删除当前手机浏览器中的 ${state.records.length} 条试穿结果，个人全身照和身体数据不受影响。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="confirm-clear">确认删除</button></div>`),
     "confirm-clear": async () => { state.records=[]; await dbSet("records", []); closeModal(); render(); toast("试穿记录已清理"); },
     "toggle-consent": () => { state.consent=!state.consent; savePreferences(); closeModal(); actions.privacy(); },
-    account: () => openModal("账号与显示名称", `<label class="data-field"><span>显示名称</span><div><input id="accountName" maxlength="12" value="${escapeHtml(state.userName)}" aria-label="显示名称"></div></label><p>当前版本不上传手机号和密码，个人资料只保存在本机。</p>`, `<button class="primary-btn full" data-action="save-account">保存</button>`),
+    account: () => openModal("账号与显示名称", `<label class="data-field"><span>显示名称</span><div><input id="accountName" maxlength="12" value="${escapeHtml(state.userName)}" aria-label="显示名称"></div></label><p>显示名称和个人资料只保存在本机。Hugging Face 登录仅用于调用你的免费 GPU 额度。</p>`, `<button class="primary-btn full" data-action="save-account">保存</button>`),
     "save-account": () => { const value=$("#accountName")?.value.trim(); if (value) state.userName=value.slice(0,12); saveProfile(); closeModal(); render(); toast("显示名称已保存"); },
     "delete-all-data": () => openModal("删除全部个人数据？", `<p>这会删除本机保存的个人照片、身体数据、风格偏好和全部试穿记录，无法撤销。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="confirm-delete-all">确认全部删除</button></div>`),
     "confirm-delete-all": async () => { await deleteAllLocalData(); closeModal(); state.screen="welcome"; state.history=[]; render(); toast("本机个人数据已全部删除"); },
@@ -1442,6 +1637,17 @@ function setupPwa() {
 }
 
 setupPwa();
-loadAppData().then(render);
+(async function boot() {
+  try {
+    await completeHfLoginIfPresent();
+  } catch (error) {
+    state.authError = error?.message || "Hugging Face 登录没有完成";
+    history.replaceState(null, "", `${location.pathname}?v=20261115-fix10`);
+  }
+  await loadAppData();
+  await restoreHfLoginDraft();
+  render();
+  if (state.authError) toast(state.authError);
+})();
 
 
