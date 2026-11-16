@@ -59,6 +59,7 @@ const state = {
   hfTokenExpiresAt: 0,
   hfUser: null,
   authError: "",
+  justLoggedIn: false,
   gender: "female",
   bodyShape: "balanced",
   bodyData: { height: "165", weight: "50", shoulder: "38", chest: "82", waist: "64", hip: "88" },
@@ -319,6 +320,7 @@ function bodyDataPage() {
     </div>
   </div>
   <div class="privacy-line"><span>▣</span><p>身体数据仅用于本次数字形象与试穿预览，你可以随时删除。</p></div>
+  ${state.authError ? `<div class="hf-inline-status error"><span>!</span><p><b>免费账号登录未完成</b><small>${escapeHtml(state.authError)}</small></p><button data-action="hf-login">重新登录</button></div>` : state.hfToken ? `<div class="hf-inline-status"><span>✓</span><p><b>免费账号已登录</b><small>本次生成将使用你的 Hugging Face 免费额度</small></p></div>` : ""}
   <div class="sticky-actions"><button class="primary-btn full fashion-btn" data-action="generate-avatar">✦ 生成我的个人全身照</button></div>`;
 }
 
@@ -675,6 +677,7 @@ function bindInputs() {
         } else {
           state.personOriginalSrc = dataUrl;
           state.personSrc = dataUrl;
+          dbSet("hfAuthDraftPerson", dataUrl).catch(() => {});
           state.personCropZoom = 1;
           state.personCropX = 0;
           state.personCropY = 0;
@@ -836,12 +839,14 @@ async function restoreHfLoginDraft() {
 }
 
 async function beginHfLogin() {
-  await saveHfLoginDraft();
+  state.authError = "";
+  const draftSave = saveHfLoginDraft().catch(error => console.warn("Login photo draft could not be saved", error));
   const verifier = randomOauthValue(64);
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  const digestPromise = crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
   const oauthState = randomOauthValue(24);
   sessionStorage.setItem("tryon-hf-code-verifier", verifier);
   sessionStorage.setItem("tryon-hf-oauth-state", oauthState);
+  const digest = await digestPromise;
   const params = new URLSearchParams({
     client_id: HF_OAUTH_CLIENT_ID,
     redirect_uri: HF_OAUTH_REDIRECT,
@@ -851,7 +856,8 @@ async function beginHfLogin() {
     code_challenge: base64Url(digest),
     code_challenge_method: "S256"
   });
-  location.href = `https://huggingface.co/oauth/authorize?${params}`;
+  await Promise.race([draftSave, delay(700)]);
+  location.assign(`https://huggingface.co/oauth/authorize?${params}`);
 }
 
 async function completeHfLoginIfPresent() {
@@ -862,7 +868,7 @@ async function completeHfLoginIfPresent() {
   const oauthError = params.get("error");
   if (oauthError) {
     state.authError = params.get("error_description") || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261116-fix11`);
+    history.replaceState(null, "", `${location.pathname}?v=20261116-fix12`);
     return;
   }
   if (!code) return;
@@ -894,7 +900,9 @@ async function completeHfLoginIfPresent() {
   state.hfToken = token.access_token;
   state.hfTokenExpiresAt = expiresAt;
   state.hfUser = userInfo;
-  history.replaceState(null, "", `${location.pathname}?v=20261116-fix11`);
+  state.authError = "";
+  state.justLoggedIn = true;
+  history.replaceState(null, "", `${location.pathname}?v=20261116-fix12`);
 }
 
 function logoutHf() {
@@ -1647,12 +1655,13 @@ setupPwa();
     await completeHfLoginIfPresent();
   } catch (error) {
     state.authError = error?.message || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261116-fix11`);
+    history.replaceState(null, "", `${location.pathname}?v=20261116-fix12`);
   }
   await loadAppData();
   await restoreHfLoginDraft();
   render();
-  if (state.authError) toast(state.authError);
+  if (state.authError) toast(`登录未完成：${state.authError}`);
+  else if (state.justLoggedIn) toast("免费账号登录成功");
 })();
 
 
