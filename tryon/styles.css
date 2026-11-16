@@ -514,5 +514,11 @@ img { display: block; max-width: 100%; }
 .hf-inline-status.error { grid-template-columns:28px 1fr auto; border-color:#e9cfc3; background:#fff7f3; }
 .hf-inline-status.error > span { background:#b15c3a; }
 .hf-inline-status.error > button { padding:7px 9px; border:0; border-radius:999px; color:#fff; background:#7b3f27; font-size:8px; }
+.hf-token-field { display:block; margin:12px 0 8px; }
+.hf-token-field > span { display:block; margin-bottom:6px; color:#5f5147; font-size:9px; font-weight:700; }
+.hf-token-field input { width:100%; height:46px; padding:0 12px; border:1px solid #dfd4ca; border-radius:13px; outline:none; color:#2d2119; background:#fff; font-size:12px; }
+.hf-token-field input:focus { border-color:#9e6a43; box-shadow:0 0 0 3px rgba(158,106,67,.10); }
+.hf-login-links { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.hf-login-links a,.hf-login-links button { padding:4px 0; border:0; color:#9a6239; background:transparent; font-size:9px; text-decoration:none; }
 
 
