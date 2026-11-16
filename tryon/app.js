@@ -200,7 +200,6 @@ function render() {
 }
 
 function welcomePage() {
-  const hfName = state.hfUser?.preferred_username || state.hfUser?.name || "";
   return `<div class="splash">
     <div class="splash-brand">TRY ON｜试一试</div>
     <div class="splash-copy">
@@ -210,7 +209,6 @@ function welcomePage() {
     </div>
     <img class="splash-model" src="assets/hero-young-v2.webp" alt="年轻时尚的AI试穿示例模特">
     <button class="primary-btn full" data-action="start">${state.profileReady ? "进入我的试穿空间" : "上传全身照，建立个人形象"} <span>›</span></button>
-    ${state.hfToken ? `<div class="hf-welcome-status"><span>✓</span><b>${escapeHtml(hfName || "Hugging Face 免费账号")}</b><small>已使用免费账号额度</small></div>` : `<button class="hf-login-entry" data-action="hf-login"><b>◉ 免费账号登录</b><small>匿名约 2 分钟 → 免费账号约 5 分钟 GPU / 24小时</small></button>`}
   </div>`;
 }
 
@@ -322,7 +320,7 @@ function bodyDataPage() {
     </div>
   </div>
   <div class="privacy-line"><span>▣</span><p>身体数据仅用于本次数字形象与试穿预览，你可以随时删除。</p></div>
-  ${state.authError ? `<div class="hf-inline-status error"><span>!</span><p><b>免费账号登录未完成</b><small>${escapeHtml(state.authError)}</small></p><button data-action="hf-login">重新登录</button></div>` : state.hfToken ? `<div class="hf-inline-status"><span>✓</span><p><b>免费账号已登录</b><small>本次生成将使用你的 Hugging Face 免费额度</small></p></div>` : ""}
+  <div class="info-strip"><span>ⓘ</span><span>请上传正面、无遮挡、从头到脚完整的全身照。免费流程只做白底人物处理，不消耗试穿 GPU。</span></div>
   <div class="sticky-actions"><button class="primary-btn full fashion-btn" data-action="generate-avatar">✦ 生成我的个人全身照</button></div>`;
 }
 
@@ -339,7 +337,7 @@ function avatarGeneratingPage() {
     <div class="scan-frame photo-scan">${state.personOriginalSrc || state.personSrc ? `<img src="${state.personOriginalSrc || state.personSrc}" alt="正在建立的个人形象">` : `<div class="scan-silhouette">♙</div>`}<i></i><span></span></div>
     <span class="micro-label">AI BODY PROFILE</span>
     <h2>正在建立你的<br>个人数字形象</h2>
-    <p id="avatarStatus">AI 正在提取人物并生成白底数字形象，请保持页面打开</p>
+    <p id="avatarStatus">正在进行白底人物处理，不占用最终试穿的 GPU 额度</p>
     <div class="progress-wrap"><div class="progress-track"><div id="avatarProgressBar" class="progress-bar" style="width:${state.avatarProgress}%"></div></div><span id="avatarProgressNum" class="progress-num">${state.avatarProgress}%</span></div>
     <div class="generation-tags"><span>照片优化</span><span>数据建档</span><span>形象确认</span></div>
     <div class="info-strip"><span>✦</span><span>数字形象用于穿搭预览，不代表精确的人体测量或尺码建议。</span></div>
@@ -372,7 +370,7 @@ async function beginAvatarGeneration() {
       if (state.screen === "avatarGenerating") go("avatarResult", { replace: true });
       return;
     }
-    state.personSrc = await createDigitalAvatar(source);
+    state.personSrc = await createQuotaFreeAvatar(source);
     state.avatarFingerprint = expectedFingerprint;
     state.avatarProgress = 100;
     const bar = $("#avatarProgressBar");
@@ -395,14 +393,14 @@ async function beginAvatarGeneration() {
 }
 
 function avatarErrorPage() {
-  return `<div class="generation error-state"><div class="error-orbit">!</div><span class="micro-label">AVATAR GENERATION STOPPED</span><h2>正面数字形象<br>还没有生成成功</h2><p>${escapeHtml(state.avatarError || "AI 服务暂时不可用，请稍后重试。")}</p><div class="tips-card"><h4>本次不会把简单抠图冒充 AI 形象</h4><p>✓ 将使用生成式模型补全缺失身体并调整为正面站姿</p><p>✓ 请保持当前页面打开并使用稳定 Wi-Fi</p><p>✓ 面部越清晰，身份特征越稳定</p>${state.avatarErrorRaw ? `<details><summary>查看错误代码</summary><code>${escapeHtml(state.avatarErrorRaw)}</code></details>` : ""}</div><div class="button-row"><button class="ghost-btn" data-action="person-reselect">更换照片</button><button class="primary-btn" data-action="retry-avatar">重新生成</button></div></div>`;
+  return `<div class="generation error-state"><div class="error-orbit">!</div><span class="micro-label">PHOTO PROCESSING STOPPED</span><h2>白底数字形象<br>还没有处理成功</h2><p>${escapeHtml(state.avatarError || "人物处理服务暂时不可用，请稍后重试。")}</p><div class="tips-card"><h4>请检查上传照片</h4><p>✓ 正面站立、人物无遮挡</p><p>✓ 从头部到脚部完整进入画面</p><p>✓ 背景与人物轮廓尽量清晰</p>${state.avatarErrorRaw ? `<details><summary>查看错误代码</summary><code>${escapeHtml(state.avatarErrorRaw)}</code></details>` : ""}</div><div class="button-row"><button class="ghost-btn" data-action="person-reselect">更换照片</button><button class="primary-btn" data-action="retry-avatar">重新处理</button></div></div>`;
 }
 
 function avatarResultPage() {
   const shapeName = { slim: "纤细", balanced: "匀称", curvy: "曲线", athletic: "健体" }[state.bodyShape];
   return `<div class="avatar-result">
     <div class="avatar-stage"><img src="${state.personSrc}" alt="我的个人AI全身形象"><span>MY DIGITAL SELF</span><button data-action="favorite-avatar">♡</button></div>
-    <div class="avatar-result-copy"><span class="success-pill">✓ 正面数字形象已生成</span><h2>你好，这是你的<br>数字试穿形象</h2><p>AI 已补全画面、调整为正面站姿并生成白底全身照；请确认人脸与身形后再用于试穿。</p></div>
+    <div class="avatar-result-copy"><span class="success-pill">✓ 白底数字形象已建立</span><h2>你好，这是你的<br>数字试穿形象</h2><p>人物已完成白底整理并缓存在本机；后续试穿不会重复处理这张照片。</p></div>
     <div class="avatar-data-row"><span><b>${state.bodyData.height}</b> cm<small>身高</small></span><span><b>${state.bodyData.weight}</b> kg<small>体重</small></span><span><b>${shapeName}</b><small>身形</small></span></div>
     <div class="button-row"><button class="ghost-btn" data-action="avatar-adjust">调整数据</button><button class="primary-btn fashion-btn" data-action="avatar-use">使用此形象 ›</button></div>
     <button class="text-action" data-action="avatar-upload-photo">更换真人全身照</button>
@@ -411,7 +409,7 @@ function avatarResultPage() {
 
 function personUploadPage() {
   return `<div class="flow-steps" aria-label="个人形象建立步骤"><span class="active">1</span><i></i><span>2</span><i></i><span>3</span><small>上传照片</small><small>身体数据</small><small>完成形象</small></div>
-  <div class="page-intro"><span class="micro-label">FACE & BODY IDENTITY</span><h2>上传一张<br>清晰个人照片</h2><p>AI 会补全缺失身体并调整为正面白底全身照；面部越清晰，身份特征越稳定。</p></div>
+  <div class="page-intro"><span class="micro-label">FACE & BODY IDENTITY</span><h2>上传一张<br>清晰个人照片</h2><p>请选择正面、无遮挡、头脚完整的全身照，系统会生成可缓存的白底人物图。</p></div>
   <label class="upload-zone" for="personFile"><input class="sr-only" id="personFile" type="file" accept="image/*" data-file="person"><div><div class="big-icon">▧</div><h3>上传全身照</h3><p>支持 JPG、PNG，建议正面 3:4</p></div></label>
   <div class="option-list">
     <button class="option-row featured" data-action="demo-person"><span class="row-icon">✦</span><span><b>先用示例照片体验</b><small>仅用于查看流程，不会成为你的真人档案</small></span><span class="chev">›</span></button>
@@ -447,7 +445,7 @@ function photoGuidePage() {
     <div class="check-item"><span>▧</span><b>背景简洁</b><span>纯色或简洁墙面</span><i class="check-ok">●</i></div>
   </div>
   <div class="selected-photo"><img src="${state.personSrc}" alt="已选择的个人照片"><div><b>照片已确认</b><p>✓ 将用于保留身份特征</p></div></div>
-  <div class="identity-note"><b>人脸一致性提示</b><p>请确保面部无遮挡、无重度美颜、光线均匀。换装服务会保留原图人物，但生成式模型仍可能轻微改变五官或发丝。</p></div>
+  <div class="identity-note"><b>照片完整性提示</b><p>请确保正面站立、面部无遮挡、双手和双脚完整。免费流程不会自动补全被裁掉的身体部位。</p></div>
   <button class="single-person-check ${state.singlePersonConfirmed ? "active" : ""}" data-action="toggle-single-person"><span>${state.singlePersonConfirmed ? "✓" : ""}</span><b>确认裁剪画面中只有我本人一张脸</b></button>
   <div class="button-row"><button class="ghost-btn" data-action="back-to-person-crop">重新裁剪</button><button class="primary-btn ${state.singlePersonConfirmed ? "" : "disabled"}" data-action="photo-next">确认照片并填写数据</button></div>`;
 }
@@ -470,7 +468,7 @@ function confirmPage() {
     <button class="setting-row" data-action="style-pref"><span>♙</span><span>风格偏好</span><b>${state.stylePrefs.join(" · ") || "未设置"} ›</b></button>
     <div class="setting-row"><span>✧</span><span>生成预览</span><b>标准（1张） ›</b></div>
   </div>
-  <div class="info-strip"><span>ⓘ</span><span>将调用 Hugging Face ZeroGPU 上的开源真实试穿模型。匿名免费额度有限，高峰期可能需要排队。</span></div>
+  <div class="info-strip"><span>ⓘ</span><span>只有点击开始试穿后才会调用一次共享 GPU；相同人物与商品会直接读取缓存。</span></div>
   <div class="sticky-actions"><button class="primary-btn full" data-action="generate">✧ 开始 AI 试穿</button></div>`;
 }
 
@@ -481,7 +479,7 @@ function generatingPage() {
     <p id="queueStatus">${escapeHtml(state.queueMessage)}</p>
     <div class="progress-wrap"><div class="progress-track"><div id="progressBar" class="progress-bar" style="width:${state.progress}%"></div></div><span id="progressNum" class="progress-num">${state.progress}%</span></div>
     <div class="generation-meta"><span>◷ 当前状态<b id="queueDetail">${state.queuePosition ? `排队第 ${state.queuePosition} 位` : "连接中"}</b></span><i></i><span>▱ 生成张数<b>1 张预览图</b></span></div>
-    <div class="tips-card"><h4>✧ 试穿小贴士</h4><p>✓ 清晰照片有助于保持人物特征</p><p>✓ 免费 GPU 高峰期会排队，页面会显示实时队列</p><p>✓ 视觉预览不等同于真实尺码与合身效果</p></div>
+    <div class="tips-card"><h4>✧ 试穿小贴士</h4><p>✓ 本次流程只在最终试穿调用一次 GPU</p><p>✓ 相同输入会直接读取缓存，不重复消耗额度</p><p>✓ 免费 GPU 高峰期仍可能排队</p></div>
     <button class="text-action cancel-generation" data-action="cancel-generation">取消本次生成</button>
   </div>`;
 }
@@ -508,11 +506,24 @@ async function beginGeneration() {
     if (num) num.textContent = `${state.progress}%`;
   }, 650);
   try {
+    const fingerprint = await computeTryOnFingerprint();
+    const cached = await dbGet("tryOnCache").catch(() => null);
+    if (cached?.fingerprint === fingerprint && cached?.image) {
+      state.queueMessage = "人物与商品没有变化，正在读取已缓存的试穿结果…";
+      updateGenerationStatus();
+      state.resultSrc = cached.image;
+      state.requestId = cached.requestId || "cached";
+      state.progress = 100;
+      await delay(280);
+      if (state.screen === "generating") go("result", { replace: true });
+      return;
+    }
     const response = await callTryOnApi();
     state.queueMessage = "正在整理最终试穿结果…";
     updateGenerationStatus();
     state.resultSrc = response.image;
     state.requestId = response.requestId || "";
+    await dbSet("tryOnCache", { fingerprint, image: response.image, requestId: state.requestId, createdAt: Date.now() }).catch(() => {});
     state.progress = 100;
     const bar = $("#progressBar");
     const num = $("#progressNum");
@@ -625,10 +636,8 @@ function stylePrefsPage() {
 
 function profilePage() {
   const avatar = state.personSrc || "assets/hero-young-v2.webp";
-  const hfName = state.hfUser?.preferred_username || state.hfUser?.name || "";
-  return `<div class="profile-head"><img class="avatar" src="${avatar}" alt="我的头像"><div><h2>${escapeHtml(state.userName)} <span class="vip">${state.hfToken ? "免费账号" : "游客"}</span></h2><p>${state.profileReady ? "个人 AI 形象已建立" : "请先建立个人 AI 形象"}</p></div><button class="icon-btn" data-action="settings">›</button></div>
-  <div class="hf-auth-card ${state.hfToken ? "connected" : ""}"><div><span class="hf-mark">HF</span><p><b>${state.hfToken ? escapeHtml(hfName || "Hugging Face 已登录") : "登录免费 Hugging Face 账号"}</b><small>${state.hfToken ? "约 5 分钟 GPU / 24小时 · 中等排队优先级" : "游客约 2 分钟，登录后提升至约 5 分钟"}</small></p></div><button data-action="${state.hfToken ? "hf-logout" : "hf-login"}">${state.hfToken ? "退出" : "免费登录"}</button></div>
-  <div class="member-card"><div class="top"><h3>✦ 我的数字形象</h3><button data-action="photo-archive">${state.profileReady ? "管理形象" : "立即建立"} ›</button></div><div class="quota"><div><span>保存的试穿</span><b>${state.records.length} 次</b></div><div><span>AI 服务</span><b>${state.hfToken ? "免费账号额度" : CONFIG.apiBase ? "游客额度" : "等待连接"}</b></div></div></div>
+  return `<div class="profile-head"><img class="avatar" src="${avatar}" alt="我的头像"><div><h2>${escapeHtml(state.userName)} <span class="vip">本地形象</span></h2><p>${state.profileReady ? "个人 AI 形象已建立" : "请先建立个人 AI 形象"}</p></div><button class="icon-btn" data-action="settings">›</button></div>
+  <div class="member-card"><div class="top"><h3>✦ 我的数字形象</h3><button data-action="photo-archive">${state.profileReady ? "管理形象" : "立即建立"} ›</button></div><div class="quota"><div><span>保存的试穿</span><b>${state.records.length} 次</b></div><div><span>AI 服务</span><b>${CONFIG.apiBase ? "免费共享" : "等待连接"}</b></div></div></div>
   <div class="profile-stats">
     <button class="stat-card" data-action="open-wardrobe"><b>${state.records.filter(x=>x.favorite).length}</b><span>我的收藏</span></button>
     <button class="stat-card" data-action="style-pref"><b>${state.stylePrefs.length}</b><span>风格偏好</span></button>
@@ -648,11 +657,10 @@ function profilePage() {
 
 function settingsPage() {
   return `<div class="settings-section"><h3>照片与试穿记录</h3><div class="menu-list"><button class="menu-item" data-action="photo-archive"><span>▧</span><b>照片管理</b><small>${state.profileReady ? "共 1 张" : "暂无照片"} ›</small></button><button class="menu-item" data-action="clear-records"><span>♜</span><b>删除试穿记录</b><small>${state.records.length} 条，可批量清理 ›</small></button></div></div>
-  <div class="settings-section"><h3>免费 AI 账号</h3><div class="menu-list"><button class="menu-item" data-action="${state.hfToken ? "hf-logout" : "hf-login"}"><span>HF</span><b>${state.hfToken ? "Hugging Face 已登录" : "登录 Hugging Face"}</b><small>${state.hfToken ? "免费账号额度 · 退出 ›" : "提升免费生成额度 ›"}</small></button></div></div>
-  <div class="settings-section"><h3>隐私与安全</h3><div class="menu-list"><button class="menu-item" data-action="privacy"><span>▣</span><b>隐私与授权</b><small>相机、相册、数据权限 ›</small></button><button class="menu-item" data-action="account"><span>◉</span><b>账号与安全</b><small>手机号、密码、登录管理 ›</small></button></div></div>
+  <div class="settings-section"><h3>隐私与本机资料</h3><div class="menu-list"><button class="menu-item" data-action="privacy"><span>▣</span><b>隐私与授权</b><small>相机、相册、数据权限 ›</small></button><button class="menu-item" data-action="account"><span>◉</span><b>显示名称</b><small>仅保存在本机 ›</small></button></div></div>
   <div class="settings-section"><h3>服务与帮助</h3><div class="menu-list"><button class="menu-item" data-action="help"><span>?</span><b>客服帮助</b><small>在线咨询 · 常见问题 ›</small></button></div></div>
   <button class="danger-btn" data-action="delete-all-data">删除本机全部个人数据</button>
-  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v2.0 正面形象与模特商品提取版</p>`;
+  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v2.1 单次 GPU 与缓存版</p>`;
 }
 
 function bindInputs() {
@@ -884,7 +892,7 @@ async function completeHfLoginIfPresent() {
   const oauthError = params.get("error");
   if (oauthError) {
     state.authError = params.get("error_description") || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261116-fix13`);
+    history.replaceState(null, "", `${location.pathname}?v=20261116-fix14`);
     return;
   }
   if (!code) return;
@@ -918,7 +926,7 @@ async function completeHfLoginIfPresent() {
   state.hfUser = userInfo;
   state.authError = "";
   state.justLoggedIn = true;
-  history.replaceState(null, "", `${location.pathname}?v=20261116-fix13`);
+  history.replaceState(null, "", `${location.pathname}?v=20261116-fix14`);
 }
 
 function logoutHf() {
@@ -931,6 +939,19 @@ function logoutHf() {
 async function computeAvatarFingerprint(source) {
   const profile = JSON.stringify({ source, bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender });
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(profile));
+  return base64Url(digest);
+}
+
+async function computeTryOnFingerprint() {
+  const input = JSON.stringify({
+    person: state.personSrc,
+    product: state.productSrc,
+    garmentType: state.garmentType,
+    garmentSubtype: state.garmentSubtype,
+    garmentPhotoMode: state.garmentPhotoMode,
+    engine: "leffa-12-steps-v1"
+  });
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
   return base64Url(digest);
 }
 
@@ -1244,14 +1265,30 @@ async function createWhiteBackgroundAvatar(source) {
   throw new Error(`AVATAR_ALL_BACKENDS_FAILED | ${failures.join(" | ")}`);
 }
 
+async function createQuotaFreeAvatar(source) {
+  if (!source) throw new Error("MISSING_PERSON_IMAGE");
+  const status = $("#avatarStatus");
+  if (status) status.textContent = "正在通过 CPU 提取人物并生成白底形象，不占用试穿 GPU…";
+  try {
+    const blob = await fetch(source).then(response => response.blob());
+    const uploaded = await uploadToGradio(AVATAR_CPU_FALLBACK, blob, "person.jpg");
+    const result = await callGradioDirect(AVATAR_CPU_FALLBACK, "update_ui", [uploaded, "PNG"], { timeout: 180000 });
+    let file = extractRemoteFile(result?.[1] || result?.[0]);
+    if (!file) throw new Error("CPU_AVATAR_EMPTY_RESULT");
+    if (!/^https?:|^data:/i.test(file)) file = `${AVATAR_CPU_FALLBACK}/gradio_api/file=${encodeURIComponent(file)}`;
+    return await compositeOnWhite(file);
+  } catch (error) {
+    if (status) status.textContent = "CPU 人物提取暂不可用，正在使用本机白底整理…";
+    return await compositeOnWhite(source);
+  }
+}
+
 function friendlyAvatarError(error) {
   const text = String(error?.message || error || "");
-  if (error?.name === "AbortError" || /TIMEOUT/i.test(text)) return "正面形象生成等待超时，请稍后重新生成。";
-  if (/quota|ZeroGPU|429|capacity|busy/i.test(text)) return "今天的免费 GPU 额度可能已经用完，请在额度恢复后再生成正面数字形象。";
-  if (/HF_START_422|validation error|field required|missing/i.test(text)) return "形象模型接口刚刚更新，请刷新页面后重新生成。";
-  if (/HF_UPLOAD|Failed to fetch|network|fetch/i.test(text)) return "手机网络暂时无法连接生成式形象服务，请切换稳定 Wi-Fi 后重试。";
-  if (/HF_GENERATION_FAILED|AVATAR_GENERATIVE_EMPTY_RESULT/i.test(text)) return "生成式模型没有返回完整形象，请更换面部更清晰的照片后重试。";
-  return text.length < 120 ? text : "正面数字形象服务暂时不可用，请稍后重试。";
+  if (error?.name === "AbortError" || /TIMEOUT/i.test(text)) return "人物白底处理等待超时，请稍后重新尝试。";
+  if (/HF_START_422|validation error|field required|missing/i.test(text)) return "人物处理接口暂时不可用，请刷新页面后重试。";
+  if (/HF_UPLOAD|Failed to fetch|network|fetch/i.test(text)) return "手机网络暂时无法连接人物处理服务，请切换稳定 Wi-Fi 后重试。";
+  return text.length < 120 ? text : "白底人物处理暂时不可用，请稍后重试。";
 }
 
 async function callTryOnApi() {
@@ -1287,7 +1324,7 @@ async function callTryOnApi() {
       error.code = validation.error_code || "NO_PERSON_DETECTED";
       throw error;
     }
-    const result = await callGradioDirect(base, "tryon", [personFile, garmentFile, category, state.garmentPhotoMode === "worn", requestId, 16, 2.2, 42], {
+    const result = await callGradioDirect(base, "tryon", [personFile, garmentFile, category, state.garmentPhotoMode === "worn", requestId, 12, 2.0, 42], {
       timeout: 240000,
       onEvent: event => {
         state.queueMessage = event === "pending" ? "请求已提交，正在等待免费 GPU…" : event === "generating" ? "GPU 已开始生成，请保持页面打开…" : "正在接收生成结果…";
@@ -1462,7 +1499,7 @@ async function loadAppData() {
 async function deleteAllLocalData() {
   localStorage.removeItem(PROFILE_KEY);
   localStorage.removeItem(PREFS_KEY);
-  await Promise.all([dbDelete("profileImage"), dbDelete("profileOriginalImage"), dbDelete("records")]);
+  await Promise.all([dbDelete("profileImage"), dbDelete("profileOriginalImage"), dbDelete("records"), dbDelete("tryOnCache")]);
   state.profileReady = false;
   state.personSrc = "";
   state.personOriginalSrc = "";
@@ -1587,14 +1624,13 @@ document.addEventListener("click", event => {
     },
     "category-next": () => { if (!state.garmentSubtype) return toast("请先确认毛衣、夹克等具体款式"); if (state.profileReady) go("confirm"); else { state.resumeTryOn=true; go("personUpload"); } },
     "generate-avatar": async () => {
-      if (!state.consent) return openModal("需要图片处理授权", `<p>生成正面数字形象需要把你选择的个人照片发送至 Hugging Face 公共生成式图像模型。请先查看并允许。</p>`, `<button class="primary-btn full" data-action="privacy">查看并授权</button>`);
+      if (!state.consent) return openModal("需要图片处理授权", `<p>生成白底数字形象需要处理你选择的个人照片。请先查看并允许。</p>`, `<button class="primary-btn full" data-action="privacy">查看并授权</button>`);
       if (!state.bodyData.height || !state.bodyData.weight) return toast("请先填写身高和体重");
       if (!state.personSrc) return toast("请先上传一张正面全身照");
       const source = state.personOriginalSrc || state.personSrc;
       const fingerprint = await computeAvatarFingerprint(source).catch(() => "");
       const canUseCache = Boolean(state.profileReady && fingerprint && state.avatarFingerprint === fingerprint && state.personSrc);
       if (canUseCache) { state.avatarProgress=0; return go("avatarGenerating"); }
-      if (!state.hfToken) return openFreeAccountModal("avatar");
       state.avatarProgress = 0;
       go("avatarGenerating");
     },
@@ -1611,7 +1647,7 @@ document.addEventListener("click", event => {
     "back-to-person-crop": () => go("personCrop"),
     "toggle-single-person": () => { state.singlePersonConfirmed=!state.singlePersonConfirmed; render(); },
     "photo-next": () => { if (!state.singlePersonConfirmed) return toast("请先确认画面中只有你本人一张脸"); go("bodyData"); },
-    generate: () => { if (!state.consent) return openModal("需要图片处理授权", `<p>只有在你主动点击生成时，人物照和商品图才会发送至 AI 服务进行本次换装。请先在隐私设置中允许。</p>`, `<button class="primary-btn full" data-action="privacy">查看并授权</button>`); if (!state.hfToken) return openFreeAccountModal("tryon"); state.progress=0; state.generationError=""; go("generating"); },
+    generate: () => { if (!state.consent) return openModal("需要图片处理授权", `<p>只有在你主动点击生成时，人物照和商品图才会发送至 AI 服务进行本次换装。请先在隐私设置中允许。</p>`, `<button class="primary-btn full" data-action="privacy">查看并授权</button>`); state.progress=0; state.generationError=""; go("generating"); },
     "continue-tryon-guest": () => { closeModal(); state.progress=0; state.generationError=""; go("generating"); },
     "hf-login": () => openFreeAccountModal("account"),
     "hf-token-login": () => {
@@ -1639,7 +1675,7 @@ document.addEventListener("click", event => {
     "smart-style": () => openModal("智能搭配", `<p>根据你当前选择的米白上衣，推荐轻酷叠穿、奶油柔光与先锋极简三种方向。</p><div class="look-row">${lookCard("assets/inspire-urban-v2.webp","轻酷叠穿","look-urban")}${lookCard("assets/inspire-soft-v2.webp","奶油柔光","look-soft")}${lookCard("assets/inspire-cool-v2.webp","先锋极简","look-cool")}</div>`),
     settings: () => go("settings"),
     "body-profile": () => go("bodyData"),
-    privacy: () => openModal("照片用途与隐私", `<p><b>本机保存：</b>数字形象、身体数据和试穿记录保存在当前手机浏览器中。</p><p><b>AI 处理：</b>点击生成数字形象时，个人照片会发送至 Hugging Face 公共生成式图像模型，用于补全身体、调整正面站姿和生成白底形象；点击开始试穿时，数字形象与商品图会发送至公共试穿模型。图片用于当次临时推理，不上传腾讯云 COS，也不会加入本应用的永久云端相册。请勿上传身份证件或其他敏感照片。</p><p><b>你的控制：</b>可在设置中删除照片、记录或全部本机个人数据。</p><button class="consent-row" data-action="toggle-consent"><span>${state.consent ? "✓" : ""}</span><b>允许在点击生成时发送图片至 AI 服务</b></button>`),
+    privacy: () => openModal("照片用途与隐私", `<p><b>本机保存：</b>数字形象、身体数据和试穿记录保存在当前手机浏览器中。</p><p><b>AI 处理：</b>数字形象阶段仅进行 CPU 白底人物处理，不调用生成式 GPU；最终试穿时才把数字形象与商品图发送至公共试穿模型。图片用于当次临时推理，不上传腾讯云 COS，也不会加入本应用的永久云端相册。请勿上传身份证件或其他敏感照片。</p><p><b>你的控制：</b>可在设置中删除照片、记录或全部本机个人数据。</p><button class="consent-row" data-action="toggle-consent"><span>${state.consent ? "✓" : ""}</span><b>允许在点击生成时发送图片至 AI 服务</b></button>`),
     "style-pref": () => go("stylePrefs"),
     "toggle-pref": () => { const value=trigger.dataset.value; state.stylePrefs = state.stylePrefs.includes(value) ? state.stylePrefs.filter(x=>x!==value) : state.stylePrefs.length<4 ? [...state.stylePrefs,value] : state.stylePrefs; closeModal(); actions["style-pref"](); },
     "save-prefs": () => { savePreferences(); closeModal(); render(); toast("风格偏好已保存"); },
@@ -1649,7 +1685,7 @@ document.addEventListener("click", event => {
     "delete-photo": () => openModal("删除个人照片？", `<p>删除后，现有试穿记录仍会保留，但再次生成前必须上传新的全身照。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="confirm-delete-photo">确认删除</button></div>`),
     "confirm-delete-photo": async () => { await Promise.all([dbDelete("profileImage"),dbDelete("profileOriginalImage")]); localStorage.removeItem(PROFILE_KEY); state.personSrc=""; state.personOriginalSrc=""; state.avatarFingerprint=""; state.profileReady=false; closeModal(); render(); toast("个人照片已删除"); },
     more: () => openModal("更多操作", `<div class="option-list"><button class="option-row" data-action="privacy"><span class="row-icon">▣</span><span><b>隐私说明</b></span><span class="chev">›</span></button><button class="option-row" data-action="help"><span class="row-icon">?</span><span><b>使用帮助</b></span><span class="chev">›</span></button></div>`),
-    help: () => openModal("使用帮助", `<p><b>首次使用：</b>上传面部清晰的个人照片 → 填写身体数据 → AI 补全并生成正面白底全身形象。</p><p><b>试穿：</b>上传商品图 → 确认“模特上身图 / 单件商品图” → 选择毛衣、夹克等具体款式 → 调用 Hugging Face ZeroGPU 真实生成。</p><p><b>效果建议：</b>人物照尽量无遮挡；商品图应能清楚看见服装完整轮廓，避免多人和复杂叠穿。</p>`),
+    help: () => openModal("使用帮助", `<p><b>首次使用：</b>上传正面、无遮挡、头脚完整的个人全身照 → 填写身体数据 → 生成可缓存的白底形象。</p><p><b>试穿：</b>上传商品图 → 确认“模特上身图 / 单件商品图” → 选择毛衣、夹克等具体款式 → 仅在最后一步调用免费 GPU。</p><p><b>额度节省：</b>相同人物和商品会直接读取缓存；更换人物、商品或服装类型才会重新生成。</p>`),
     message: () => openModal("消息通知", `<div class="empty-state small"><span>♧</span><h3>暂无新消息</h3><p>生成完成、服务状态与隐私更新会显示在这里。</p></div>`),
     upgrade: () => openModal("AI 服务说明", `<p>当前版本使用 Hugging Face ZeroGPU 的开源试穿模型，不收取费用；匿名用户每天有少量 GPU 额度，高峰期可能排队。</p>`),
     manage: () => openModal("管理试穿记录", `<p>当前共有 <b>${state.records.length}</b> 条本机记录。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="clear-records">全部清理</button></div>`),
@@ -1657,7 +1693,7 @@ document.addEventListener("click", event => {
     "clear-records": () => openModal("删除试穿记录", `<p>确认后将永久删除当前手机浏览器中的 ${state.records.length} 条试穿结果，个人全身照和身体数据不受影响。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="confirm-clear">确认删除</button></div>`),
     "confirm-clear": async () => { state.records=[]; await dbSet("records", []); closeModal(); render(); toast("试穿记录已清理"); },
     "toggle-consent": () => { state.consent=!state.consent; savePreferences(); closeModal(); actions.privacy(); },
-    account: () => openModal("账号与显示名称", `<label class="data-field"><span>显示名称</span><div><input id="accountName" maxlength="12" value="${escapeHtml(state.userName)}" aria-label="显示名称"></div></label><p>显示名称和个人资料只保存在本机。Hugging Face 登录仅用于调用你的免费 GPU 额度。</p>`, `<button class="primary-btn full" data-action="save-account">保存</button>`),
+    account: () => openModal("本机显示名称", `<label class="data-field"><span>显示名称</span><div><input id="accountName" maxlength="12" value="${escapeHtml(state.userName)}" aria-label="显示名称"></div></label><p>显示名称和个人资料只保存在当前手机浏览器，不需要登录账号。</p>`, `<button class="primary-btn full" data-action="save-account">保存</button>`),
     "save-account": () => { const value=$("#accountName")?.value.trim(); if (value) state.userName=value.slice(0,12); saveProfile(); closeModal(); render(); toast("显示名称已保存"); },
     "delete-all-data": () => openModal("删除全部个人数据？", `<p>这会删除本机保存的个人照片、身体数据、风格偏好和全部试穿记录，无法撤销。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="confirm-delete-all">确认全部删除</button></div>`),
     "confirm-delete-all": async () => { await deleteAllLocalData(); closeModal(); state.screen="welcome"; state.history=[]; render(); toast("本机个人数据已全部删除"); },
@@ -1689,7 +1725,7 @@ setupPwa();
     await completeHfLoginIfPresent();
   } catch (error) {
     state.authError = error?.message || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261116-fix13`);
+    history.replaceState(null, "", `${location.pathname}?v=20261116-fix14`);
   }
   await loadAppData();
   await restoreHfLoginDraft();
