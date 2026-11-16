@@ -862,7 +862,7 @@ async function completeHfLoginIfPresent() {
   const oauthError = params.get("error");
   if (oauthError) {
     state.authError = params.get("error_description") || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261115-fix10`);
+    history.replaceState(null, "", `${location.pathname}?v=20261116-fix11`);
     return;
   }
   if (!code) return;
@@ -894,7 +894,7 @@ async function completeHfLoginIfPresent() {
   state.hfToken = token.access_token;
   state.hfTokenExpiresAt = expiresAt;
   state.hfUser = userInfo;
-  history.replaceState(null, "", `${location.pathname}?v=20261115-fix10`);
+  history.replaceState(null, "", `${location.pathname}?v=20261116-fix11`);
 }
 
 function logoutHf() {
@@ -1455,7 +1455,7 @@ function toast(message) {
 }
 
 function openModal(title, body, actions = "") {
-  $("#modalRoot").innerHTML = `<div class="modal-backdrop" data-action="close-modal"><div class="modal-sheet" role="dialog" aria-modal="true" aria-label="${title}" onclick="event.stopPropagation()"><div class="modal-handle"></div><h3>${title}</h3><div>${body}</div>${actions || `<button class="primary-btn full" data-action="close-modal">知道了</button>`}</div></div>`;
+  $("#modalRoot").innerHTML = `<div class="modal-backdrop"><div class="modal-sheet" role="dialog" aria-modal="true" aria-label="${title}"><div class="modal-handle"></div><h3>${title}</h3><div>${body}</div>${actions || `<button class="primary-btn full" data-action="close-modal">知道了</button>`}</div></div>`;
 }
 
 function closeModal() { $("#modalRoot").innerHTML = ""; }
@@ -1471,6 +1471,7 @@ function openFreeAccountModal(kind) {
 }
 
 document.addEventListener("click", event => {
+  if (event.target.classList?.contains("modal-backdrop")) { closeModal(); return; }
   const tab = event.target.closest("[data-tab]");
   if (tab) {
     const target = tab.dataset.tab;
@@ -1584,7 +1585,7 @@ document.addEventListener("click", event => {
     "photo-next": () => { if (!state.singlePersonConfirmed) return toast("请先确认画面中只有你本人一张脸"); go("bodyData"); },
     generate: () => { if (!state.consent) return openModal("需要图片处理授权", `<p>只有在你主动点击生成时，人物照和商品图才会发送至 AI 服务进行本次换装。请先在隐私设置中允许。</p>`, `<button class="primary-btn full" data-action="privacy">查看并授权</button>`); if (!state.hfToken) return openFreeAccountModal("tryon"); state.progress=0; state.generationError=""; go("generating"); },
     "continue-tryon-guest": () => { closeModal(); state.progress=0; state.generationError=""; go("generating"); },
-    "hf-login": () => { closeModal(); beginHfLogin().catch(error => { state.authError=error.message || "登录暂时不可用"; toast(state.authError); }); },
+    "hf-login": () => { closeModal(); toast("正在打开免费账号登录…"); beginHfLogin().catch(error => { state.authError=error.message || "登录暂时不可用"; toast(state.authError); }); },
     "hf-logout": () => { logoutHf(); render(); toast("已退出 Hugging Face 免费账号"); },
     favorite: () => { state.favorite=!state.favorite; render(); toast(state.favorite ? "已收藏" : "已取消收藏"); },
     download: () => { const a=document.createElement("a"); a.href=state.resultSrc; a.download="TRY-ON-试穿预览.webp"; a.click(); toast("已开始下载预览图"); },
@@ -1646,7 +1647,7 @@ setupPwa();
     await completeHfLoginIfPresent();
   } catch (error) {
     state.authError = error?.message || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261115-fix10`);
+    history.replaceState(null, "", `${location.pathname}?v=20261116-fix11`);
   }
   await loadAppData();
   await restoreHfLoginDraft();
