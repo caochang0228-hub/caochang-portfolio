@@ -13,6 +13,7 @@ const HF_OAUTH_REDIRECT = "https://u2zqev.com.cn/tryon/";
 const HF_OAUTH_SCOPES = "openid profile inference-api";
 const HF_AUTH_SESSION_KEY = "tryon-hf-auth-v1";
 const HF_AUTH_DRAFT_KEY = "tryon-hf-auth-draft-v1";
+const HF_AUTH_DRAFT_PERSON_KEY = "tryon-hf-auth-draft-person-v1";
 
 const state = {
   screen: "welcome",
@@ -60,6 +61,7 @@ const state = {
   hfUser: null,
   authError: "",
   justLoggedIn: false,
+  hfLoginUrl: "",
   gender: "female",
   bodyShape: "balanced",
   bodyData: { height: "165", weight: "50", shoulder: "38", chest: "82", waist: "64", hip: "88" },
@@ -802,7 +804,7 @@ function hfAuthHeaders(base, extra = {}) {
   return headers;
 }
 
-async function saveHfLoginDraft() {
+function saveHfLoginDraft() {
   const draft = {
     bodyData: state.bodyData,
     bodyShape: state.bodyShape,
@@ -812,7 +814,11 @@ async function saveHfLoginDraft() {
     updatedAt: Date.now()
   };
   localStorage.setItem(HF_AUTH_DRAFT_KEY, JSON.stringify(draft));
-  if (draft.hasPerson) await dbSet("hfAuthDraftPerson", state.personOriginalSrc || state.personSrc);
+  if (draft.hasPerson) {
+    const person = state.personOriginalSrc || state.personSrc;
+    try { sessionStorage.setItem(HF_AUTH_DRAFT_PERSON_KEY, person); }
+    catch (error) { dbSet("hfAuthDraftPerson", person).catch(() => {}); }
+  }
 }
 
 async function restoreHfLoginDraft() {
@@ -823,7 +829,7 @@ async function restoreHfLoginDraft() {
     state.bodyShape = draft.bodyShape || state.bodyShape;
     state.gender = draft.gender || state.gender;
     state.resumeTryOn = Boolean(draft.resumeTryOn);
-    const person = await dbGet("hfAuthDraftPerson");
+    const person = sessionStorage.getItem(HF_AUTH_DRAFT_PERSON_KEY) || await dbGet("hfAuthDraftPerson");
     if (person && !state.profileReady) {
       state.personOriginalSrc = person;
       state.personSrc = person;
@@ -831,22 +837,22 @@ async function restoreHfLoginDraft() {
       state.screen = "bodyData";
       state.onboarding = true;
     }
-    localStorage.removeItem(HF_AUTH_DRAFT_KEY);
-    await dbDelete("hfAuthDraftPerson");
+    if (state.hfToken) {
+      localStorage.removeItem(HF_AUTH_DRAFT_KEY);
+      sessionStorage.removeItem(HF_AUTH_DRAFT_PERSON_KEY);
+      await dbDelete("hfAuthDraftPerson");
+    }
   } catch (error) {
     console.warn("HF login draft could not be restored", error);
   }
 }
 
-async function beginHfLogin() {
-  state.authError = "";
-  const draftSave = saveHfLoginDraft().catch(error => console.warn("Login photo draft could not be saved", error));
+async function prepareHfLoginUrl() {
   const verifier = randomOauthValue(64);
-  const digestPromise = crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
   const oauthState = randomOauthValue(24);
   sessionStorage.setItem("tryon-hf-code-verifier", verifier);
   sessionStorage.setItem("tryon-hf-oauth-state", oauthState);
-  const digest = await digestPromise;
   const params = new URLSearchParams({
     client_id: HF_OAUTH_CLIENT_ID,
     redirect_uri: HF_OAUTH_REDIRECT,
@@ -856,8 +862,18 @@ async function beginHfLogin() {
     code_challenge: base64Url(digest),
     code_challenge_method: "S256"
   });
-  await Promise.race([draftSave, delay(700)]);
-  location.assign(`https://huggingface.co/oauth/authorize?${params}`);
+  state.hfLoginUrl = `https://huggingface.co/oauth/authorize?${params}`;
+  return state.hfLoginUrl;
+}
+
+function beginHfLogin() {
+  state.authError = "";
+  saveHfLoginDraft();
+  if (state.hfLoginUrl) {
+    location.href = state.hfLoginUrl;
+    return Promise.resolve();
+  }
+  return prepareHfLoginUrl().then(url => { location.href = url; });
 }
 
 async function completeHfLoginIfPresent() {
@@ -868,7 +884,7 @@ async function completeHfLoginIfPresent() {
   const oauthError = params.get("error");
   if (oauthError) {
     state.authError = params.get("error_description") || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261116-fix12`);
+    history.replaceState(null, "", `${location.pathname}?v=20261116-fix13`);
     return;
   }
   if (!code) return;
@@ -902,7 +918,7 @@ async function completeHfLoginIfPresent() {
   state.hfUser = userInfo;
   state.authError = "";
   state.justLoggedIn = true;
-  history.replaceState(null, "", `${location.pathname}?v=20261116-fix12`);
+  history.replaceState(null, "", `${location.pathname}?v=20261116-fix13`);
 }
 
 function logoutHf() {
@@ -1470,11 +1486,15 @@ function closeModal() { $("#modalRoot").innerHTML = ""; }
 
 function openFreeAccountModal(kind) {
   const isAvatar = kind === "avatar";
+  const isTryOn = kind === "tryon";
+  const guestAction = isAvatar ? "continue-avatar-guest" : isTryOn ? "continue-tryon-guest" : "close-modal";
   openModal(
-    "登录后免费额度更多",
+    "使用免费账号额度",
     `<div class="quota-login-copy"><div><b>游客模式</b><span>约 2 分钟 GPU / 24小时</span></div><i>→</i><div class="better"><b>免费账号</b><span>约 5 分钟 GPU / 24小时</span></div></div>
-    <p>登录使用 Hugging Face 官方授权，不需要付费。登录信息只保存在当前浏览器会话中，不会写入网页代码；你也可以继续使用游客额度。</p>`,
-    `<div class="button-row"><button class="ghost-btn" data-action="${isAvatar ? "continue-avatar-guest" : "continue-tryon-guest"}">游客继续</button><button class="primary-btn" data-action="hf-login">免费登录</button></div>`
+    <p>国内网络可能无法打开 Hugging Face 登录页。可在电脑端免费创建一个以 <b>hf_</b> 开头的访问令牌，粘贴后直接使用账号额度。令牌只保存在当前浏览器会话，不会写入网页或 GitHub。</p>
+    <label class="hf-token-field"><span>Hugging Face 访问令牌</span><input id="hfAccessToken" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="hf_xxxxxxxxxxxx"></label>
+    <div class="hf-login-links"><a href="https://huggingface.co/settings/tokens" target="_blank">获取免费令牌 ↗</a><button data-action="hf-web-login">海外网络可用：网页登录</button></div>`,
+    `<div class="button-row"><button class="ghost-btn" data-action="${guestAction}">${isAvatar || isTryOn ? "游客继续" : "暂不登录"}</button><button class="primary-btn" data-action="hf-token-login">令牌登录</button></div>`
   );
 }
 
@@ -1593,7 +1613,21 @@ document.addEventListener("click", event => {
     "photo-next": () => { if (!state.singlePersonConfirmed) return toast("请先确认画面中只有你本人一张脸"); go("bodyData"); },
     generate: () => { if (!state.consent) return openModal("需要图片处理授权", `<p>只有在你主动点击生成时，人物照和商品图才会发送至 AI 服务进行本次换装。请先在隐私设置中允许。</p>`, `<button class="primary-btn full" data-action="privacy">查看并授权</button>`); if (!state.hfToken) return openFreeAccountModal("tryon"); state.progress=0; state.generationError=""; go("generating"); },
     "continue-tryon-guest": () => { closeModal(); state.progress=0; state.generationError=""; go("generating"); },
-    "hf-login": () => { closeModal(); toast("正在打开免费账号登录…"); beginHfLogin().catch(error => { state.authError=error.message || "登录暂时不可用"; toast(state.authError); }); },
+    "hf-login": () => openFreeAccountModal("account"),
+    "hf-token-login": () => {
+      const token = $("#hfAccessToken")?.value.trim() || "";
+      if (!/^hf_[A-Za-z0-9_-]{12,}$/.test(token)) return toast("请输入有效的 hf_ 访问令牌");
+      const expiresAt = Date.now() + 12 * 60 * 60 * 1000;
+      sessionStorage.setItem(HF_AUTH_SESSION_KEY, JSON.stringify({ accessToken: token, expiresAt, userInfo: { name: "Hugging Face 免费账号" } }));
+      state.hfToken = token;
+      state.hfTokenExpiresAt = expiresAt;
+      state.hfUser = { name: "Hugging Face 免费账号" };
+      state.authError = "";
+      closeModal();
+      render();
+      toast("免费账号令牌已登录");
+    },
+    "hf-web-login": () => { closeModal(); toast("正在打开 Hugging Face…"); beginHfLogin().catch(error => { state.authError=error.message || "网页登录暂时不可用"; render(); toast(state.authError); }); },
     "hf-logout": () => { logoutHf(); render(); toast("已退出 Hugging Face 免费账号"); },
     favorite: () => { state.favorite=!state.favorite; render(); toast(state.favorite ? "已收藏" : "已取消收藏"); },
     download: () => { const a=document.createElement("a"); a.href=state.resultSrc; a.download="TRY-ON-试穿预览.webp"; a.click(); toast("已开始下载预览图"); },
@@ -1655,7 +1689,7 @@ setupPwa();
     await completeHfLoginIfPresent();
   } catch (error) {
     state.authError = error?.message || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261116-fix12`);
+    history.replaceState(null, "", `${location.pathname}?v=20261116-fix13`);
   }
   await loadAppData();
   await restoreHfLoginDraft();
