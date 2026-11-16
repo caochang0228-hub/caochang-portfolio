@@ -505,5 +505,14 @@ img { display: block; max-width: 100%; }
 .quota-login-copy b { margin-bottom:4px; color:#36281e; font-size:11px; }
 .quota-login-copy span { color:#8b7c70; font-size:8px; line-height:1.4; }
 .quota-login-copy i { color:#b27648; font-style:normal; text-align:center; }
+.hf-inline-status { display:grid; grid-template-columns:28px 1fr; align-items:center; gap:9px; margin:12px 0 74px; padding:11px 12px; border:1px solid #d7e6d4; border-radius:14px; background:#f4faf3; }
+.hf-inline-status > span { width:28px; height:28px; display:grid; place-items:center; border-radius:50%; color:#fff; background:#5d8c59; font-size:12px; font-weight:800; }
+.hf-inline-status p { min-width:0; margin:0; }
+.hf-inline-status b,.hf-inline-status small { display:block; }
+.hf-inline-status b { color:#30452f; font-size:10px; }
+.hf-inline-status small { margin-top:3px; color:#71816e; font-size:8px; line-height:1.4; }
+.hf-inline-status.error { grid-template-columns:28px 1fr auto; border-color:#e9cfc3; background:#fff7f3; }
+.hf-inline-status.error > span { background:#b15c3a; }
+.hf-inline-status.error > button { padding:7px 9px; border:0; border-radius:999px; color:#fff; background:#7b3f27; font-size:8px; }
 
 
