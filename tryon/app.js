@@ -466,9 +466,9 @@ function confirmPage() {
     <div class="setting-row"><span>▧</span><span>商品来源</span><b>${state.garmentPhotoMode === "worn" ? "模特上身图 · 自动提取" : "单件商品图"}</b></div>
     <button class="setting-row" data-action="avatar-adjust"><span>♙</span><span>身体数据</span><b>${state.bodyData.height} cm · ${state.bodyData.weight} kg ›</b></button>
     <button class="setting-row" data-action="style-pref"><span>♙</span><span>风格偏好</span><b>${state.stylePrefs.join(" · ") || "未设置"} ›</b></button>
-    <div class="setting-row"><span>✧</span><span>生成预览</span><b>标准（1张） ›</b></div>
+    <div class="setting-row"><span>✧</span><span>生成预览</span><b>精细贴合（1张） ›</b></div>
   </div>
-  <div class="info-strip"><span>ⓘ</span><span>只有点击开始试穿后才会调用一次共享 GPU；相同人物与商品会直接读取缓存。</span></div>
+  <div class="info-strip"><span>ⓘ</span><span>20 步精细贴合并在本机保护原始人脸；相同人物与商品会直接读取缓存。</span></div>
   <div class="sticky-actions"><button class="primary-btn full" data-action="generate">✧ 开始 AI 试穿</button></div>`;
 }
 
@@ -479,7 +479,7 @@ function generatingPage() {
     <p id="queueStatus">${escapeHtml(state.queueMessage)}</p>
     <div class="progress-wrap"><div class="progress-track"><div id="progressBar" class="progress-bar" style="width:${state.progress}%"></div></div><span id="progressNum" class="progress-num">${state.progress}%</span></div>
     <div class="generation-meta"><span>◷ 当前状态<b id="queueDetail">${state.queuePosition ? `排队第 ${state.queuePosition} 位` : "连接中"}</b></span><i></i><span>▱ 生成张数<b>1 张预览图</b></span></div>
-    <div class="tips-card"><h4>✧ 试穿小贴士</h4><p>✓ 本次流程只在最终试穿调用一次 GPU</p><p>✓ 相同输入会直接读取缓存，不重复消耗额度</p><p>✓ 免费 GPU 高峰期仍可能排队</p></div>
+    <div class="tips-card"><h4>✧ 试穿小贴士</h4><p>✓ 20 步推理增强衣服轮廓与身体贴合</p><p>✓ 生成后在手机本地保护原始人脸，不增加 GPU 消耗</p><p>✓ 相同输入会直接读取缓存，不重复消耗额度</p></div>
     <button class="text-action cancel-generation" data-action="cancel-generation">取消本次生成</button>
   </div>`;
 }
@@ -519,11 +519,15 @@ async function beginGeneration() {
       return;
     }
     const response = await callTryOnApi();
-    state.queueMessage = "正在整理最终试穿结果…";
+    state.queueMessage = "正在保护人脸特征并整理服装轮廓…";
     updateGenerationStatus();
-    state.resultSrc = response.image;
+    const protectedResult = await protectIdentityFace(
+      response.image,
+      state.personOriginalSrc || state.personSrc
+    );
+    state.resultSrc = protectedResult;
     state.requestId = response.requestId || "";
-    await dbSet("tryOnCache", { fingerprint, image: response.image, requestId: state.requestId, createdAt: Date.now() }).catch(() => {});
+    await dbSet("tryOnCache", { fingerprint, image: protectedResult, requestId: state.requestId, createdAt: Date.now() }).catch(() => {});
     state.progress = 100;
     const bar = $("#progressBar");
     const num = $("#progressNum");
@@ -892,7 +896,7 @@ async function completeHfLoginIfPresent() {
   const oauthError = params.get("error");
   if (oauthError) {
     state.authError = params.get("error_description") || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261116-fix14`);
+    history.replaceState(null, "", `${location.pathname}?v=20261119-fix15`);
     return;
   }
   if (!code) return;
@@ -926,7 +930,7 @@ async function completeHfLoginIfPresent() {
   state.hfUser = userInfo;
   state.authError = "";
   state.justLoggedIn = true;
-  history.replaceState(null, "", `${location.pathname}?v=20261116-fix14`);
+  history.replaceState(null, "", `${location.pathname}?v=20261119-fix15`);
 }
 
 function logoutHf() {
@@ -949,7 +953,7 @@ async function computeTryOnFingerprint() {
     garmentType: state.garmentType,
     garmentSubtype: state.garmentSubtype,
     garmentPhotoMode: state.garmentPhotoMode,
-    engine: "leffa-12-steps-v1"
+    engine: "leffa-20-face-protect-v2"
   });
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
   return base64Url(digest);
@@ -1136,9 +1140,9 @@ async function protectIdentityFace(resultSrc, identitySrc) {
     overlayCtx.drawImage(identity, 0, 0, canvas.width, canvas.height);
     overlayCtx.globalCompositeOperation = "destination-in";
     const cx = canvas.width * 0.5;
-    const cy = canvas.height * 0.135;
-    const rx = canvas.width * 0.072;
-    const ry = canvas.height * 0.06;
+    const cy = canvas.height * 0.14;
+    const rx = canvas.width * 0.09;
+    const ry = canvas.height * 0.09;
     overlayCtx.save();
     overlayCtx.translate(cx, cy);
     overlayCtx.scale(rx, ry);
@@ -1324,7 +1328,7 @@ async function callTryOnApi() {
       error.code = validation.error_code || "NO_PERSON_DETECTED";
       throw error;
     }
-    const result = await callGradioDirect(base, "tryon", [personFile, garmentFile, category, state.garmentPhotoMode === "worn", requestId, 12, 2.0, 42], {
+    const result = await callGradioDirect(base, "tryon", [personFile, garmentFile, category, state.garmentPhotoMode === "worn", requestId, 20, 2.5, 42], {
       timeout: 240000,
       onEvent: event => {
         state.queueMessage = event === "pending" ? "请求已提交，正在等待免费 GPU…" : event === "generating" ? "GPU 已开始生成，请保持页面打开…" : "正在接收生成结果…";
@@ -1725,7 +1729,7 @@ setupPwa();
     await completeHfLoginIfPresent();
   } catch (error) {
     state.authError = error?.message || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261116-fix14`);
+    history.replaceState(null, "", `${location.pathname}?v=20261119-fix15`);
   }
   await loadAppData();
   await restoreHfLoginDraft();
