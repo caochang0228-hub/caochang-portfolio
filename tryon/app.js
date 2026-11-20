@@ -46,6 +46,7 @@ const state = {
   generationError: "",
   requestId: "",
   generationRunning: false,
+  generationCancelled: false,
   avatarRunning: false,
   avatarError: "",
   avatarErrorRaw: "",
@@ -466,9 +467,9 @@ function confirmPage() {
     <div class="setting-row"><span>▧</span><span>商品来源</span><b>${state.garmentPhotoMode === "worn" ? "模特上身图 · 自动提取" : "单件商品图"}</b></div>
     <button class="setting-row" data-action="avatar-adjust"><span>♙</span><span>身体数据</span><b>${state.bodyData.height} cm · ${state.bodyData.weight} kg ›</b></button>
     <button class="setting-row" data-action="style-pref"><span>♙</span><span>风格偏好</span><b>${state.stylePrefs.join(" · ") || "未设置"} ›</b></button>
-    <div class="setting-row"><span>✧</span><span>生成预览</span><b>精细贴合（1张） ›</b></div>
+    <div class="setting-row"><span>✧</span><span>生成预览</span><b>姿态贴合（1张） ›</b></div>
   </div>
-  <div class="info-strip"><span>ⓘ</span><span>20 步精细贴合并在本机保护原始人脸；相同人物与商品会直接读取缓存。</span></div>
+  <div class="info-strip"><span>ⓘ</span><span>按人物姿态和身体区域生成服装贴合，并在本机保护原始人脸。</span></div>
   <div class="sticky-actions"><button class="primary-btn full" data-action="generate">✧ 开始 AI 试穿</button></div>`;
 }
 
@@ -479,7 +480,7 @@ function generatingPage() {
     <p id="queueStatus">${escapeHtml(state.queueMessage)}</p>
     <div class="progress-wrap"><div class="progress-track"><div id="progressBar" class="progress-bar" style="width:${state.progress}%"></div></div><span id="progressNum" class="progress-num">${state.progress}%</span></div>
     <div class="generation-meta"><span>◷ 当前状态<b id="queueDetail">${state.queuePosition ? `排队第 ${state.queuePosition} 位` : "连接中"}</b></span><i></i><span>▱ 生成张数<b>1 张预览图</b></span></div>
-    <div class="tips-card"><h4>✧ 试穿小贴士</h4><p>✓ 20 步推理增强衣服轮廓与身体贴合</p><p>✓ 生成后在手机本地保护原始人脸，不增加 GPU 消耗</p><p>✓ 相同输入会直接读取缓存，不重复消耗额度</p></div>
+    <div class="tips-card"><h4>✧ 试穿小贴士</h4><p>✓ 识别人体姿态、身体分区与服装遮罩</p><p>✓ 主节点失败时会自动切换备用节点</p><p>✓ 相同输入直接读取缓存，不重复消耗额度</p></div>
     <button class="text-action cancel-generation" data-action="cancel-generation">取消本次生成</button>
   </div>`;
 }
@@ -493,6 +494,7 @@ function updateGenerationStatus() {
 
 async function beginGeneration() {
   state.generationRunning = true;
+  state.generationCancelled = false;
   state.progress = 4;
   state.queueMessage = "正在连接免费 GPU…";
   state.queuePosition = null;
@@ -545,7 +547,7 @@ async function beginGeneration() {
 }
 
 function generationErrorPage() {
-  return `<div class="generation error-state"><div class="error-orbit">!</div><span class="micro-label">GENERATION STOPPED</span><h2>这次没有生成成功</h2><p>${escapeHtml(state.generationError || "服务暂时不可用，请稍后重试。")}</p><div class="tips-card"><h4>你可以检查</h4><p>✓ 具体款式是否选择正确</p><p>✓ 商品来源是否选对“模特上身图 / 单件商品图”</p><p>✓ 免费额度是否已恢复、当前网络是否稳定</p>${state.requestId ? `<p>请求编号：${escapeHtml(state.requestId)}</p>` : ""}</div><div class="button-row"><button class="ghost-btn" data-action="back-to-confirm">返回检查</button><button class="primary-btn" data-action="retry-generate">重新生成</button></div></div>`;
+  return `<div class="generation error-state"><div class="error-orbit">!</div><span class="micro-label">GENERATION STOPPED</span><h2>这次没有生成成功</h2><p>${escapeHtml(state.generationError || "服务暂时不可用，请稍后重试。")}</p><div class="tips-card"><h4>你可以检查</h4><p>✓ 商品区域是否完整，且没有包袋、手臂等大面积遮挡</p><p>✓ 商品来源是否选对“模特上身图 / 单件商品图”</p><p>✓ 具体款式是否与毛衣、夹克、裙装等类别一致</p>${state.requestId ? `<p>请求编号：${escapeHtml(state.requestId)}</p>` : ""}</div><div class="button-row"><button class="ghost-btn" data-action="back-to-confirm">返回检查</button><button class="primary-btn" data-action="retry-generate">重新生成</button></div></div>`;
 }
 
 function resultPage() {
@@ -664,7 +666,7 @@ function settingsPage() {
   <div class="settings-section"><h3>隐私与本机资料</h3><div class="menu-list"><button class="menu-item" data-action="privacy"><span>▣</span><b>隐私与授权</b><small>相机、相册、数据权限 ›</small></button><button class="menu-item" data-action="account"><span>◉</span><b>显示名称</b><small>仅保存在本机 ›</small></button></div></div>
   <div class="settings-section"><h3>服务与帮助</h3><div class="menu-list"><button class="menu-item" data-action="help"><span>?</span><b>客服帮助</b><small>在线咨询 · 常见问题 ›</small></button></div></div>
   <button class="danger-btn" data-action="delete-all-data">删除本机全部个人数据</button>
-  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v2.1 单次 GPU 与缓存版</p>`;
+  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v2.2 姿态贴合与双节点版</p>`;
 }
 
 function bindInputs() {
@@ -896,7 +898,7 @@ async function completeHfLoginIfPresent() {
   const oauthError = params.get("error");
   if (oauthError) {
     state.authError = params.get("error_description") || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261119-fix15`);
+    history.replaceState(null, "", `${location.pathname}?v=20261120-fix16`);
     return;
   }
   if (!code) return;
@@ -930,7 +932,7 @@ async function completeHfLoginIfPresent() {
   state.hfUser = userInfo;
   state.authError = "";
   state.justLoggedIn = true;
-  history.replaceState(null, "", `${location.pathname}?v=20261119-fix15`);
+  history.replaceState(null, "", `${location.pathname}?v=20261120-fix16`);
 }
 
 function logoutHf() {
@@ -953,7 +955,7 @@ async function computeTryOnFingerprint() {
     garmentType: state.garmentType,
     garmentSubtype: state.garmentSubtype,
     garmentPhotoMode: state.garmentPhotoMode,
-    engine: "leffa-20-face-protect-v2"
+    engine: "leffa-24-densepose-failover-v3"
   });
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
   return base64Url(digest);
@@ -1295,6 +1297,81 @@ function friendlyAvatarError(error) {
   return text.length < 120 ? text : "白底人物处理暂时不可用，请稍后重试。";
 }
 
+function getTryOnBases() {
+  const configured = Array.isArray(CONFIG.apiBases) ? CONFIG.apiBases : [];
+  return [...new Set([...configured, CONFIG.apiBase].filter(Boolean).map(base => base.replace(/\/$/, "")))];
+}
+
+function canFailoverTryOn(error) {
+  if (state.generationCancelled) return false;
+  const code = String(error?.code || "").toUpperCase();
+  const text = String(error?.message || error || "");
+  if (["NO_PERSON_DETECTED", "NO_GARMENT_FOUND", "BAD_IMAGE"].includes(code)) return false;
+  return error?.name === "AbortError" || ["TIMEOUT", "OUT_OF_MEMORY", "INTERNAL"].includes(code) ||
+    /VTON_SERVICE_NOT_READY|HF_START|HF_RESULT|HF_UPLOAD|HF_INCOMPLETE|HF_GENERATION_FAILED|Failed to fetch|network|fetch/i.test(text);
+}
+
+async function fetchImageBlob(source, label) {
+  const response = await fetch(source);
+  if (!response.ok) throw new Error(`${label}_IMAGE_${response.status}`);
+  const blob = await response.blob();
+  if (!blob.size) throw new Error(`${label}_IMAGE_EMPTY`);
+  return blob;
+}
+
+async function callLeffaBackend(base, personBlob, garmentBlob, requestId, attemptIndex) {
+  if (state.generationCancelled) throw new Error("GENERATION_CANCELLED");
+  state.queueMessage = attemptIndex ? "主节点繁忙，正在自动切换备用节点…" : "正在检查免费试穿服务状态…";
+  updateGenerationStatus();
+  const healthResult = await callGradioDirect(base, "health", [], { timeout: 55000 });
+  const health = Array.isArray(healthResult) ? healthResult[0] : healthResult;
+  if (health && health.ready === false) {
+    const error = new Error(health.error || "VTON_SERVICE_NOT_READY");
+    error.code = "VTON_SERVICE_NOT_READY";
+    throw error;
+  }
+
+  state.queueMessage = "正在上传人物与商品图片…";
+  updateGenerationStatus();
+  const [personFile, garmentFile] = await Promise.all([
+    uploadToGradio(base, personBlob, "person.jpg"),
+    uploadToGradio(base, garmentBlob, "garment.jpg")
+  ]);
+
+  state.queueMessage = "正在识别人体姿态与服装区域…";
+  updateGenerationStatus();
+  const validationResult = await callGradioDirect(base, "validate", [personFile], { timeout: 90000 });
+  const validation = Array.isArray(validationResult) ? validationResult[0] : validationResult;
+  if (validation && validation.usable === false) {
+    const error = new Error(validation.reason || validation.error_code || "NO_PERSON_DETECTED");
+    error.code = validation.error_code || "NO_PERSON_DETECTED";
+    throw error;
+  }
+
+  const category = { top: "upper", bottom: "lower", dress: "dress" }[state.garmentType] || "upper";
+  const result = await callGradioDirect(
+    base,
+    "tryon",
+    [personFile, garmentFile, category, state.garmentPhotoMode === "worn", requestId, 24, 2.5, 42],
+    {
+      timeout: 300000,
+      onEvent: event => {
+        state.queueMessage = event === "pending" ? "请求已提交，正在等待免费 GPU…" :
+          event === "generating" ? "正在按人体姿态生成服装贴合效果…" : "正在接收生成结果…";
+        updateGenerationStatus();
+      }
+    }
+  );
+  const payload = Array.isArray(result) ? result[0] : result;
+  if (!payload?.ok || !payload?.image) {
+    const error = new Error(payload?.message || payload?.error_code || "HF_GENERATION_FAILED");
+    error.code = payload?.error_code;
+    error.requestId = payload?.request_hash || requestId;
+    throw error;
+  }
+  return { image: payload.image, requestId: payload.request_hash || requestId };
+}
+
 async function callTryOnApi() {
   if (!CONFIG.apiBase && !CONFIG.spaceId) throw new Error("AI_BACKEND_NOT_CONFIGURED");
   if (!state.personSrc || !state.productSrc) throw new Error("MISSING_IMAGES");
@@ -1302,47 +1379,21 @@ async function callTryOnApi() {
   if (CONFIG.apiMode === "hf-public-leffa") {
     const requestId = globalThis.crypto?.randomUUID?.() || `tryon-${Date.now()}`;
     state.requestId = requestId;
-    const category = { top: "upper", bottom: "lower", dress: "dress" }[state.garmentType] || "upper";
-    const base = CONFIG.apiBase.replace(/\/$/, "");
-    state.queueMessage = "正在检查免费试穿服务状态…";
-    updateGenerationStatus();
-    const healthResult = await callGradioDirect(base, "health", [], { timeout: 45000 });
-    const health = Array.isArray(healthResult) ? healthResult[0] : healthResult;
-    if (health && health.ready === false) throw new Error(health.error || "VTON_SERVICE_NOT_READY");
     const [personBlob, garmentBlob] = await Promise.all([
-      fetch(state.personSrc).then(response => response.blob()),
-      fetch(state.productSrc).then(response => response.blob())
+      fetchImageBlob(state.personSrc, "PERSON"),
+      fetchImageBlob(state.productSrc, "GARMENT")
     ]);
-    state.queueMessage = "正在上传人物与商品图片…";
-    updateGenerationStatus();
-    const [personFile, garmentFile] = await Promise.all([
-      uploadToGradio(base, personBlob, "person.jpg"),
-      uploadToGradio(base, garmentBlob, "garment.jpg")
-    ]);
-    state.queueMessage = "正在校验数字形象是否完整…";
-    updateGenerationStatus();
-    const validationResult = await callGradioDirect(base, "validate", [personFile], { timeout: 90000 });
-    const validation = Array.isArray(validationResult) ? validationResult[0] : validationResult;
-    if (validation && validation.usable === false) {
-      const error = new Error(validation.reason || validation.error_code || "NO_PERSON_DETECTED");
-      error.code = validation.error_code || "NO_PERSON_DETECTED";
-      throw error;
-    }
-    const result = await callGradioDirect(base, "tryon", [personFile, garmentFile, category, state.garmentPhotoMode === "worn", requestId, 20, 2.5, 42], {
-      timeout: 240000,
-      onEvent: event => {
-        state.queueMessage = event === "pending" ? "请求已提交，正在等待免费 GPU…" : event === "generating" ? "GPU 已开始生成，请保持页面打开…" : "正在接收生成结果…";
-        updateGenerationStatus();
+    const bases = getTryOnBases();
+    let lastError = new Error("VTON_SERVICE_NOT_READY");
+    for (let index = 0; index < bases.length; index += 1) {
+      try {
+        return await callLeffaBackend(bases[index], personBlob, garmentBlob, `${requestId}-${index + 1}`, index);
+      } catch (error) {
+        lastError = error;
+        if (!canFailoverTryOn(error) || index === bases.length - 1) throw error;
       }
-    });
-    const payload = Array.isArray(result) ? result[0] : result;
-    if (!payload?.ok || !payload?.image) {
-      const error = new Error(payload?.message || payload?.error_code || "HF_GENERATION_FAILED");
-      error.code = payload?.error_code;
-      error.requestId = payload?.request_hash || requestId;
-      throw error;
     }
-    return { image: payload.image, requestId: payload.request_hash || requestId };
+    throw lastError;
   }
 
   const controller = new AbortController();
@@ -1703,7 +1754,7 @@ document.addEventListener("click", event => {
     "confirm-delete-all": async () => { await deleteAllLocalData(); closeModal(); state.screen="welcome"; state.history=[]; render(); toast("本机个人数据已全部删除"); },
     "retry-generate": () => { state.generationError=""; state.progress=0; go("generating", {replace:true}); },
     "retry-avatar": () => { state.avatarError=""; state.avatarErrorRaw=""; state.avatarProgress=0; go("avatarGenerating", {replace:true}); },
-    "cancel-generation": () => { state.currentJob?.cancel?.(); state.currentJob=null; state.generationRunning=false; go("confirm", {replace:true}); toast("已取消本次生成"); },
+    "cancel-generation": () => { state.generationCancelled=true; state.currentJob?.cancel?.(); state.currentJob=null; state.generationRunning=false; go("confirm", {replace:true}); toast("已取消本次生成"); },
     "back-to-confirm": () => go("confirm", {replace:true}),
     "dismiss-install": () => {
       sessionStorage.setItem("tryon-install-hint", "dismissed");
@@ -1729,7 +1780,7 @@ setupPwa();
     await completeHfLoginIfPresent();
   } catch (error) {
     state.authError = error?.message || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261119-fix15`);
+    history.replaceState(null, "", `${location.pathname}?v=20261120-fix16`);
   }
   await loadAppData();
   await restoreHfLoginDraft();
