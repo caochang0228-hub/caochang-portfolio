@@ -26,6 +26,7 @@ const state = {
   resumeTryOn: false,
   garmentType: "top",
   garmentSubtype: "jacket",
+  garmentLayer: "outer",
   garmentPhotoMode: "flat",
   productName: "短款翻领夹克",
   productSrc: "assets/garment-clean.webp",
@@ -42,6 +43,7 @@ const state = {
   singlePersonConfirmed: false,
   productCleaned: false,
   productCleaning: false,
+  outfitLayers: { inner: null, outer: null },
   resultSrc: "assets/result-main.webp",
   generationError: "",
   requestId: "",
@@ -63,6 +65,7 @@ const state = {
   authError: "",
   justLoggedIn: false,
   hfLoginUrl: "",
+  localApiBase: localStorage.getItem("tryon-local-api") || "",
   gender: "female",
   bodyShape: "balanced",
   bodyData: { height: "165", weight: "50", shoulder: "38", chest: "82", waist: "64", hip: "88" },
@@ -100,12 +103,32 @@ const screenTitles = {
 };
 
 const garmentLabels = { top: "上衣", bottom: "下装", dress: "连体服" };
+const garmentLayerLabels = { inner: "内搭", outer: "外套" };
 const garmentSubtypes = {
   top: [["knit", "毛衣 / 针织衫"], ["jacket", "外套 / 夹克"], ["shirt", "衬衫"], ["hoodie", "卫衣"], ["tshirt", "T恤 / 背心"], ["other-top", "其他上衣"]],
   bottom: [["pants", "长裤"], ["skirt", "半身裙"], ["shorts", "短裤"], ["other-bottom", "其他下装"]],
   dress: [["dress", "连衣裙"], ["jumpsuit", "连体裤"], ["other-dress", "其他连体服"]]
 };
 const garmentSubtypeLabel = key => Object.values(garmentSubtypes).flat().find(([value]) => value === key)?.[1] || "待确认款式";
+
+function currentGarmentSnapshot() {
+  return {
+    src: state.productSrc,
+    originalSrc: state.productOriginalSrc,
+    name: state.productName,
+    type: state.garmentType,
+    subtype: state.garmentSubtype,
+    photoMode: state.garmentPhotoMode,
+    cleaned: state.productCleaned,
+    layer: state.garmentType === "top" ? state.garmentLayer : "single"
+  };
+}
+
+function selectedGarments() {
+  if (state.garmentType !== "top" && !state.outfitLayers.inner && !state.outfitLayers.outer) return [currentGarmentSnapshot()];
+  const layers = [state.outfitLayers.inner, state.outfitLayers.outer].filter(Boolean);
+  return layers.length ? layers : [currentGarmentSnapshot()];
+}
 const icon = (name) => ({
   home: "⌂", tryon: "⌁", wardrobe: "◇", profile: "♙",
   upload: "▧", shirt: "♧", hanger: "⌁", closet: "▱"
@@ -284,8 +307,9 @@ function categoryPage() {
     ${categoryCard("dress", "♙", "连体服")}
   </div>
   <div class="subtype-card"><b>确认具体款式</b><p>截图识别可能受模特、包袋和叠穿影响，请以商品本身为准。</p><div class="chips subtype-chips">${garmentSubtypes[state.garmentType].map(([key, label]) => `<button class="chip ${state.garmentSubtype === key ? "active" : ""}" data-garment-subtype="${key}">${label}</button>`).join("")}</div></div>
+  ${state.garmentType === "top" ? `<div class="subtype-card"><b>选择穿搭层级</b><p>内搭会先生成，外套随后覆盖，减少两件服装互相错位。</p><div class="segment-control"><button class="${state.garmentLayer === "inner" ? "active" : ""}" data-garment-layer="inner">内搭</button><button class="${state.garmentLayer === "outer" ? "active" : ""}" data-garment-layer="outer">外套</button></div></div>` : ""}
   <div class="selected-product"><h3>已选择的商品</h3><div class="product-summary"><img src="${state.productSrc}" alt="${state.productName}"><div><h4>${state.productName}</h4><p>${garmentLabels[state.garmentType]}｜${state.productCleaned ? "背景已净化" : state.garmentPhotoMode === "worn" ? "将从模特图提取" : "已完成裁剪"}</p></div><span class="chev">›</span></div></div>
-  <div class="sticky-actions"><button class="primary-btn full" data-action="category-next">下一步</button></div>`;
+  <div class="sticky-actions"><button class="primary-btn full" data-action="category-next">加入穿搭并继续</button></div>`;
 }
 
 function categoryCard(type, symbol, label) {
@@ -363,6 +387,19 @@ async function beginAvatarGeneration() {
   try {
     const source = state.personOriginalSrc || state.personSrc;
     const expectedFingerprint = await computeAvatarFingerprint(source);
+    if (state.localApiBase) {
+      const status = $("#avatarStatus");
+      if (status) status.textContent = "本地模型正在识别人体、检查遮挡并制作白底形象…";
+      state.personSrc = await createLocalAvatar(source);
+      state.avatarFingerprint = expectedFingerprint;
+      state.avatarProgress = 100;
+      state.profileReady = true;
+      await saveProfile();
+      await dbDelete("tryOnCache").catch(() => {});
+      await delay(260);
+      if (state.screen === "avatarGenerating") go("avatarResult", { replace: true });
+      return;
+    }
     if (state.profileReady && state.avatarFingerprint === expectedFingerprint && state.personSrc) {
       const status = $("#avatarStatus");
       if (status) status.textContent = "照片与身体数据没有变化，正在读取已缓存的数字形象…";
@@ -456,22 +493,28 @@ function guideShot(src, label, cls, pos) {
   return `<div class="guide-shot ${cls}"><img src="${src}" alt="${label}" style="object-position:${pos}"><small>${label}</small></div>`;
 }
 
+function outfitLayerCard(layer) {
+  const item = state.outfitLayers[layer];
+  if (!item) return `<button class="outfit-layer-card empty" data-action="add-outfit-layer" data-layer="${layer}"><span>＋</span><b>添加${garmentLayerLabels[layer]}</b><small>${layer === "inner" ? "T恤、衬衫、针织衫" : "夹克、西装、风衣"}</small></button>`;
+  return `<div class="outfit-layer-card"><img src="${item.src}" alt="${escapeHtml(item.name)}"><div><span>${garmentLayerLabels[layer]}</span><b>${escapeHtml(item.name)}</b><small>${garmentSubtypeLabel(item.subtype)}</small></div><button data-action="remove-outfit-layer" data-layer="${layer}" aria-label="移除${garmentLayerLabels[layer]}">×</button></div>`;
+}
+
 function confirmPage() {
-  return `<div class="page-intro"><h2>确认试穿设置</h2><p>已选商品与个人数字形象确认无误后，即可开始生成。</p></div>
-  <div class="pair-grid">
-    <div class="pair-card"><img src="${state.productSrc}" alt="试穿商品"><b>试穿商品</b><small>${state.productName}</small></div>
-    <div class="pair-plus">＋</div>
-    <div class="pair-card"><img src="${state.personSrc}" alt="个人数字形象"><b>个人形象</b><small>AI数字全身照</small></div>
+  const garments = selectedGarments();
+  return `<div class="page-intro"><h2>确认分层试穿设置</h2><p>可同时选择内搭与外套，系统会按穿着顺序逐层贴合。</p></div>
+  <div class="outfit-builder">
+    <div class="outfit-layers">${outfitLayerCard("inner")}${outfitLayerCard("outer")}</div>
+    <div class="outfit-person"><img src="${state.personSrc}" alt="个人数字形象"><div><b>个人形象</b><small>人体识别与服装贴合基准</small></div></div>
   </div>
   <div class="setting-list">
-    <div class="setting-row"><span>♧</span><span>服装类型</span><b>${garmentSubtypeLabel(state.garmentSubtype)} ›</b></div>
-    <div class="setting-row"><span>▧</span><span>商品来源</span><b>${state.garmentPhotoMode === "worn" ? "模特上身图 · 自动提取" : "单件商品图"}</b></div>
+    <button class="setting-row" data-action="add-outfit-layer" data-layer="${state.outfitLayers.inner ? "outer" : "inner"}"><span>＋</span><span>继续添加商品</span><b>${garments.length}/2 件</b></button>
+    <div class="setting-row"><span>♧</span><span>生成顺序</span><b>${garments.map(item => garmentLayerLabels[item.layer] || garmentLabels[item.type]).join(" → ") || "尚未选择"}</b></div>
     <button class="setting-row" data-action="avatar-adjust"><span>♙</span><span>身体数据</span><b>${state.bodyData.height} cm · ${state.bodyData.weight} kg ›</b></button>
     <button class="setting-row" data-action="style-pref"><span>♙</span><span>风格偏好</span><b>${state.stylePrefs.join(" · ") || "未设置"} ›</b></button>
-    <div class="setting-row"><span>✧</span><span>生成预览</span><b>姿态贴合（1张） ›</b></div>
+    <div class="setting-row"><span>✧</span><span>生成预览</span><b>${garments.length > 1 ? "双层串行贴合" : "单层姿态贴合"}</b></div>
   </div>
-  <div class="info-strip"><span>ⓘ</span><span>按人物姿态和身体区域生成服装贴合，不再进行可能造成重影的手动人脸覆盖。</span></div>
-  <div class="sticky-actions"><button class="primary-btn full" data-action="generate">✧ 开始 AI 试穿</button></div>`;
+  <div class="info-strip"><span>ⓘ</span><span>双层穿搭会进行两次真实推理：先内搭，再外套。人物脸部和未换装区域不会手动覆盖。</span></div>
+  <div class="sticky-actions"><button class="primary-btn full ${garments.length ? "" : "disabled"}" data-action="generate">✧ 开始${garments.length > 1 ? "双层" : ""} AI 试穿</button></div>`;
 }
 
 function generatingPage() {
@@ -480,7 +523,7 @@ function generatingPage() {
     <h2>AI 正在生成试穿效果…</h2>
     <p id="queueStatus">${escapeHtml(state.queueMessage)}</p>
     <div class="progress-wrap"><div class="progress-track"><div id="progressBar" class="progress-bar" style="width:${state.progress}%"></div></div><span id="progressNum" class="progress-num">${state.progress}%</span></div>
-    <div class="generation-meta"><span>◷ 当前状态<b id="queueDetail">${state.queuePosition ? `排队第 ${state.queuePosition} 位` : "连接中"}</b></span><i></i><span>▱ 生成张数<b>1 张预览图</b></span></div>
+    <div class="generation-meta"><span>◷ 当前状态<b id="queueDetail">${state.queuePosition ? `排队第 ${state.queuePosition} 位` : "连接中"}</b></span><i></i><span>▱ 推理层数<b>${selectedGarments().length || 1} 层</b></span></div>
     <div class="tips-card"><h4>✧ 试穿小贴士</h4><p>✓ 识别人体姿态、身体分区与服装遮罩</p><p>✓ 主节点失败时会自动切换备用节点</p><p>✓ 相同输入直接读取缓存，不重复消耗额度</p></div>
     <button class="text-action cancel-generation" data-action="cancel-generation">取消本次生成</button>
   </div>`;
@@ -662,9 +705,10 @@ function profilePage() {
 function settingsPage() {
   return `<div class="settings-section"><h3>照片与试穿记录</h3><div class="menu-list"><button class="menu-item" data-action="photo-archive"><span>▧</span><b>照片管理</b><small>${state.profileReady ? "共 1 张" : "暂无照片"} ›</small></button><button class="menu-item" data-action="clear-records"><span>♜</span><b>删除试穿记录</b><small>${state.records.length} 条，可批量清理 ›</small></button></div></div>
   <div class="settings-section"><h3>隐私与本机资料</h3><div class="menu-list"><button class="menu-item" data-action="privacy"><span>▣</span><b>隐私与授权</b><small>相机、相册、数据权限 ›</small></button><button class="menu-item" data-action="account"><span>◉</span><b>显示名称</b><small>仅保存在本机 ›</small></button></div></div>
+  <div class="settings-section"><h3>AI生成服务</h3><div class="menu-list"><button class="menu-item" data-action="local-backend"><span>◉</span><b>本地AI后端</b><small>${state.localApiBase ? "已连接 · 自动显存模式" : "未连接 · 当前使用公共服务"} ›</small></button></div></div>
   <div class="settings-section"><h3>服务与帮助</h3><div class="menu-list"><button class="menu-item" data-action="help"><span>?</span><b>客服帮助</b><small>在线咨询 · 常见问题 ›</small></button></div></div>
   <button class="danger-btn" data-action="delete-all-data">删除本机全部个人数据</button>
-  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v2.4 强遮挡拦截版</p>`;
+  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v2.5 本地分层试穿版</p>`;
 }
 
 function bindInputs() {
@@ -896,7 +940,7 @@ async function completeHfLoginIfPresent() {
   const oauthError = params.get("error");
   if (oauthError) {
     state.authError = params.get("error_description") || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261122-fix19`);
+    history.replaceState(null, "", `${location.pathname}?v=20261122-fix20`);
     return;
   }
   if (!code) return;
@@ -930,7 +974,7 @@ async function completeHfLoginIfPresent() {
   state.hfUser = userInfo;
   state.authError = "";
   state.justLoggedIn = true;
-  history.replaceState(null, "", `${location.pathname}?v=20261122-fix19`);
+  history.replaceState(null, "", `${location.pathname}?v=20261122-fix20`);
 }
 
 function logoutHf() {
@@ -941,7 +985,7 @@ function logoutHf() {
 }
 
 async function computeAvatarFingerprint(source) {
-  const profile = JSON.stringify({ source, bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender, engine: "avatar-rebuild-v7" });
+  const profile = JSON.stringify({ source, bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender, backend: state.localApiBase ? "local-body-validate-v8" : "avatar-rebuild-v8" });
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(profile));
   return base64Url(digest);
 }
@@ -949,11 +993,8 @@ async function computeAvatarFingerprint(source) {
 async function computeTryOnFingerprint() {
   const input = JSON.stringify({
     person: state.personSrc,
-    product: state.productSrc,
-    garmentType: state.garmentType,
-    garmentSubtype: state.garmentSubtype,
-    garmentPhotoMode: state.garmentPhotoMode,
-    engine: "leffa-24-clean-avatar-no-face-paste-v5"
+    garments: selectedGarments().map(item => ({ src: item.src, type: item.type, subtype: item.subtype, layer: item.layer, photoMode: item.photoMode })),
+    engine: "leffa-layered-inner-outer-v6"
   });
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
   return base64Url(digest);
@@ -1490,6 +1531,10 @@ async function createQuotaFreeAvatar(source) {
 
 function friendlyAvatarError(error) {
   const text = String(error?.message || error || "");
+  if (error?.code === "BODY_OCCLUDED" || /包袋|遮挡/i.test(text)) return "检测到包袋或物体遮挡身体。为了避免生成错误肢体，请移开遮挡物后重新拍摄。";
+  if (error?.code === "BODY_INCOMPLETE" || /头脚完整|肩、髋、膝|脚踝/i.test(text)) return "人体关键点不完整，请上传正面站立、头部到双脚完整可见的照片。";
+  if (error?.code === "BODY_NOT_FRONTAL" || /角度偏侧|正面站立/i.test(text)) return "检测到人物角度偏侧。请面向镜头正面站立，双臂与身体分开后重新拍摄。";
+  if (/LOCAL_BACKEND|Failed to fetch|NetworkError/i.test(text) && state.localApiBase) return "无法连接电脑上的本地AI服务，请确认后端与 Tailscale Serve 正在运行。";
   if (error?.name === "AbortError" || /TIMEOUT/i.test(text)) return "人物白底处理等待超时，请稍后重新尝试。";
   if (/AVATAR_CLEANUP_REQUIRED|AVATAR_BACKGROUND_OR_OCCLUSION_INVALID/i.test(text)) return "没有得到干净的单人白底形象。请更换为正面、头脚完整、没有包袋和海报人脸遮挡的照片后重试。";
   if (/HF_START_422|validation error|field required|missing/i.test(text)) return "人物处理接口暂时不可用，请刷新页面后重试。";
@@ -1500,6 +1545,69 @@ function friendlyAvatarError(error) {
 function getTryOnBases() {
   const configured = Array.isArray(CONFIG.apiBases) ? CONFIG.apiBases : [];
   return [...new Set([...configured, CONFIG.apiBase].filter(Boolean).map(base => base.replace(/\/$/, "")))];
+}
+
+function normalizedLocalApiBase() {
+  return String(state.localApiBase || "").trim().replace(/\/$/, "");
+}
+
+function localApiFailure(payload, fallback) {
+  const detail = payload?.detail && typeof payload.detail === "object" ? payload.detail : payload;
+  const error = new Error(detail?.message || payload?.message || (typeof payload?.detail === "string" ? payload.detail : fallback));
+  error.code = detail?.error_code || payload?.error_code || "LOCAL_API_FAILED";
+  return error;
+}
+
+async function validateWithLocalBackend(source) {
+  const base = normalizedLocalApiBase();
+  if (!base) throw new Error("LOCAL_BACKEND_NOT_CONFIGURED");
+  const form = new FormData();
+  form.append("person", await fetchImageBlob(source, "PERSON"), "person.jpg");
+  const response = await fetch(`${base}/validate`, { method: "POST", body: form });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.usable === false) {
+    throw localApiFailure(payload, `LOCAL_VALIDATE_${response.status}`);
+  }
+  return payload;
+}
+
+async function createLocalAvatar(source) {
+  const base = normalizedLocalApiBase();
+  if (!base) throw new Error("LOCAL_BACKEND_NOT_CONFIGURED");
+  const form = new FormData();
+  form.append("person", await fetchImageBlob(source, "PERSON"), "person.jpg");
+  const response = await fetch(`${base}/avatar`, { method: "POST", body: form });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.ok || !payload.image) throw localApiFailure(payload, `LOCAL_AVATAR_${response.status}`);
+  return payload.image;
+}
+
+async function callLocalTryOnApi() {
+  const base = normalizedLocalApiBase();
+  let personBlob = await fetchImageBlob(state.personSrc, "PERSON");
+  const garments = selectedGarments();
+  let result = null;
+  for (let index = 0; index < garments.length; index += 1) {
+    const garment = garments[index];
+    const layerName = garmentLayerLabels[garment.layer] || garmentLabels[garment.type] || `第${index + 1}层`;
+    state.queueMessage = `本地显卡正在生成${layerName}（${index + 1}/${garments.length}）…`;
+    updateGenerationStatus();
+    const form = new FormData();
+    form.append("person", personBlob, `person-${index + 1}.png`);
+    form.append("garment", await fetchImageBlob(garment.src, "GARMENT"), `garment-${index + 1}.png`);
+    form.append("category", { top: "upper", bottom: "lower", dress: "overall" }[garment.type] || "upper");
+    form.append("seed", "42");
+    const response = await fetch(`${base}/tryon`, { method: "POST", body: form });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok || !payload.image) {
+      const error = localApiFailure(payload, `LOCAL_TRYON_${response.status}`);
+      error.code = response.status === 507 ? "OUT_OF_MEMORY" : "LOCAL_TRYON_FAILED";
+      throw error;
+    }
+    result = { image: payload.image, requestId: `local-${Date.now()}-${index + 1}` };
+    if (index < garments.length - 1) personBlob = await fetchImageBlob(payload.image, `LOCAL_LAYER_${index + 1}`);
+  }
+  return result;
 }
 
 function canFailoverTryOn(error) {
@@ -1519,7 +1627,7 @@ async function fetchImageBlob(source, label) {
   return blob;
 }
 
-async function callLeffaBackend(base, personBlob, garmentBlob, requestId, attemptIndex) {
+async function callLeffaBackend(base, personBlob, garmentBlob, requestId, attemptIndex, garment) {
   if (state.generationCancelled) throw new Error("GENERATION_CANCELLED");
   state.queueMessage = attemptIndex ? "主节点繁忙，正在自动切换备用节点…" : "正在检查免费试穿服务状态…";
   updateGenerationStatus();
@@ -1548,11 +1656,11 @@ async function callLeffaBackend(base, personBlob, garmentBlob, requestId, attemp
     throw error;
   }
 
-  const category = { top: "upper", bottom: "lower", dress: "dress" }[state.garmentType] || "upper";
+  const category = { top: "upper", bottom: "lower", dress: "dress" }[garment?.type || state.garmentType] || "upper";
   const result = await callGradioDirect(
     base,
     "tryon",
-    [personFile, garmentFile, category, state.garmentPhotoMode === "worn", requestId, 24, 2.5, 42],
+    [personFile, garmentFile, category, (garment?.photoMode || state.garmentPhotoMode) === "worn", requestId, 24, 2.5, 42],
     {
       timeout: 300000,
       onEvent: event => {
@@ -1573,6 +1681,7 @@ async function callLeffaBackend(base, personBlob, garmentBlob, requestId, attemp
 }
 
 async function callTryOnApi() {
+  if (state.localApiBase) return callLocalTryOnApi();
   if (!CONFIG.apiBase && !CONFIG.spaceId) throw new Error("AI_BACKEND_NOT_CONFIGURED");
   if (!state.personSrc || !state.productSrc) throw new Error("MISSING_IMAGES");
 
@@ -1585,21 +1694,30 @@ async function callTryOnApi() {
   if (CONFIG.apiMode === "hf-public-leffa") {
     const requestId = globalThis.crypto?.randomUUID?.() || `tryon-${Date.now()}`;
     state.requestId = requestId;
-    const [personBlob, garmentBlob] = await Promise.all([
-      fetchImageBlob(state.personSrc, "PERSON"),
-      fetchImageBlob(state.productSrc, "GARMENT")
-    ]);
+    let personBlob = await fetchImageBlob(state.personSrc, "PERSON");
+    const garments = selectedGarments();
     const bases = getTryOnBases();
-    let lastError = new Error("VTON_SERVICE_NOT_READY");
-    for (let index = 0; index < bases.length; index += 1) {
-      try {
-        return await callLeffaBackend(bases[index], personBlob, garmentBlob, `${requestId}-${index + 1}`, index);
-      } catch (error) {
-        lastError = error;
-        if (!canFailoverTryOn(error) || index === bases.length - 1) throw error;
+    let finalResult = null;
+    for (let layerIndex = 0; layerIndex < garments.length; layerIndex += 1) {
+      const garment = garments[layerIndex];
+      const garmentBlob = await fetchImageBlob(garment.src, `GARMENT_${layerIndex + 1}`);
+      const layerLabel = garmentLayerLabels[garment.layer] || garmentLabels[garment.type] || `第 ${layerIndex + 1} 层`;
+      state.queueMessage = `正在贴合${layerLabel}（${layerIndex + 1}/${garments.length}）…`;
+      updateGenerationStatus();
+      let lastError = new Error("VTON_SERVICE_NOT_READY");
+      for (let index = 0; index < bases.length; index += 1) {
+        try {
+          finalResult = await callLeffaBackend(bases[index], personBlob, garmentBlob, `${requestId}-${layerIndex + 1}-${index + 1}`, index, garment);
+          break;
+        } catch (error) {
+          lastError = error;
+          if (!canFailoverTryOn(error) || index === bases.length - 1) throw error;
+        }
       }
+      if (!finalResult?.image) throw lastError;
+      if (layerIndex < garments.length - 1) personBlob = await fetchImageBlob(finalResult.image, `LAYER_${layerIndex + 1}`);
     }
-    throw lastError;
+    return finalResult;
   }
 
   const controller = new AbortController();
@@ -1702,7 +1820,7 @@ async function dbDelete(key) {
 }
 
 async function saveProfile() {
-  const profile = { bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender, userName: state.userName, avatarFingerprint: state.avatarFingerprint, avatarVersion: 7, updatedAt: Date.now() };
+  const profile = { bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender, userName: state.userName, avatarFingerprint: state.avatarFingerprint, avatarVersion: 8, localMode: Boolean(state.localApiBase), updatedAt: Date.now() };
   if (state.usingDemo) { state.profileReady = true; return; }
   localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
   if (state.personSrc) await dbSet("profileImage", state.personSrc);
@@ -1715,11 +1833,13 @@ function savePreferences() {
 }
 
 async function saveCurrentRecord() {
+  const garments = selectedGarments();
   const item = {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     result: state.resultSrc,
     product: state.productSrc,
     productName: state.productName,
+    garments: garments.map(item => ({ src: item.src, name: item.name, type: item.type, subtype: item.subtype, layer: item.layer })),
     type: state.garmentType,
     typeLabel: garmentSubtypeLabel(state.garmentSubtype),
     favorite: state.favorite,
@@ -1747,7 +1867,7 @@ async function loadAppData() {
       state.stylePrefs = Array.isArray(prefs.stylePrefs) ? prefs.stylePrefs : state.stylePrefs;
       state.consent = prefs.consent !== false;
     }
-    const currentAvatar = Boolean(profile && profileImage && profile.avatarVersion === 7);
+    const currentAvatar = Boolean(profile && profileImage && profile.avatarVersion === 8 && Boolean(profile.localMode) === Boolean(state.localApiBase));
     state.personOriginalSrc = profileOriginalImage || profileImage || "";
     state.personSrc = currentAvatar ? profileImage : state.personOriginalSrc;
     state.profileReady = currentAvatar;
@@ -1827,6 +1947,8 @@ document.addEventListener("click", event => {
     render();
     return;
   }
+  const garmentLayer = event.target.closest("[data-garment-layer]");
+  if (garmentLayer) { state.garmentLayer = garmentLayer.dataset.garmentLayer; render(); return; }
   const photoMode = event.target.closest("[data-garment-photo-mode]");
   if (photoMode) { state.garmentPhotoMode = photoMode.dataset.garmentPhotoMode; render(); return; }
   const gender = event.target.closest("[data-gender]");
@@ -1863,7 +1985,7 @@ document.addEventListener("click", event => {
     back,
     "start-flow": () => { if (state.profileReady) go("upload"); else { state.onboarding=true; state.resumeTryOn=true; go("personUpload"); } },
     "open-wardrobe": () => go("wardrobe"),
-    "demo-product": () => { state.productSrc="assets/garment-clean.webp"; state.productOriginalSrc=state.productSrc; state.cropZoom=1; state.cropX=0; state.cropY=0; state.cropApplied=false; state.garmentType="top"; state.garmentSubtype="jacket"; state.garmentPhotoMode="flat"; state.productName="短款翻领夹克"; go("recognition"); },
+    "demo-product": () => { state.productSrc="assets/garment-clean.webp"; state.productOriginalSrc=state.productSrc; state.cropZoom=1; state.cropX=0; state.cropY=0; state.cropApplied=false; state.garmentType="top"; state.garmentSubtype="jacket"; state.garmentLayer="outer"; state.garmentPhotoMode="flat"; state.productName="短款翻领夹克"; go("recognition"); },
     "history-product": () => openModal("历史商品", `<p>你的示例商品已保留。首版将支持按来源平台、类别和收藏状态筛选。</p><button class="option-row" data-action="demo-product"><span class="row-icon">♧</span><span><b>短款翻领夹克</b><small>上衣 · 示例商品</small></span><span class="chev">›</span></button>`),
     "recrop": () => { state.cropZoom=1; state.cropX=0; state.cropY=0; state.cropApplied=false; render(); toast("已重置裁剪区域"); },
     "person-reselect-product": () => go("upload"),
@@ -1889,7 +2011,25 @@ document.addEventListener("click", event => {
       } catch (error) { toast("裁剪失败，请重新选择图片"); }
       finally { state.productCleaning = false; }
     },
-    "category-next": () => { if (!state.garmentSubtype) return toast("请先确认毛衣、夹克等具体款式"); if (state.profileReady) go("confirm"); else { state.resumeTryOn=true; go("personUpload"); } },
+    "category-next": () => {
+      if (!state.garmentSubtype) return toast("请先确认毛衣、夹克等具体款式");
+      if (state.garmentType === "top") state.outfitLayers[state.garmentLayer] = currentGarmentSnapshot();
+      else { state.outfitLayers.inner = null; state.outfitLayers.outer = null; }
+      if (state.profileReady) go("confirm"); else { state.resumeTryOn=true; go("personUpload"); }
+    },
+    "add-outfit-layer": () => {
+      state.garmentLayer = trigger.dataset.layer === "outer" ? "outer" : "inner";
+      state.garmentType = "top";
+      state.garmentSubtype = "";
+      state.productName = `待添加${garmentLayerLabels[state.garmentLayer]}`;
+      go("upload");
+    },
+    "remove-outfit-layer": () => {
+      const layer = trigger.dataset.layer === "outer" ? "outer" : "inner";
+      state.outfitLayers[layer] = null;
+      render();
+      toast(`已移除${garmentLayerLabels[layer]}`);
+    },
     "generate-avatar": async () => {
       if (!state.consent) return openModal("需要图片处理授权", `<p>生成白底数字形象需要处理你选择的个人照片。请先查看并允许。</p>`, `<button class="primary-btn full" data-action="privacy">查看并授权</button>`);
       if (!state.bodyData.height || !state.bodyData.weight) return toast("请先填写身高和体重");
@@ -1914,7 +2054,7 @@ document.addEventListener("click", event => {
     "back-to-person-crop": () => go("personCrop"),
     "toggle-single-person": () => { state.singlePersonConfirmed=!state.singlePersonConfirmed; render(); },
     "photo-next": () => { if (!state.singlePersonConfirmed) return toast("请先确认画面中只有你本人一张脸"); go("bodyData"); },
-    generate: () => { if (!state.consent) return openModal("需要图片处理授权", `<p>只有在你主动点击生成时，人物照和商品图才会发送至 AI 服务进行本次换装。请先在隐私设置中允许。</p>`, `<button class="primary-btn full" data-action="privacy">查看并授权</button>`); state.progress=0; state.generationError=""; go("generating"); },
+    generate: () => { if (!selectedGarments().length) return toast("请至少添加一件服装"); if (!state.consent) return openModal("需要图片处理授权", `<p>只有在你主动点击生成时，人物照和商品图才会发送至 AI 服务进行本次换装。请先在隐私设置中允许。</p>`, `<button class="primary-btn full" data-action="privacy">查看并授权</button>`); state.progress=0; state.generationError=""; go("generating"); },
     "continue-tryon-guest": () => { closeModal(); state.progress=0; state.generationError=""; go("generating"); },
     "hf-login": () => openFreeAccountModal("account"),
     "hf-token-login": () => {
@@ -1942,7 +2082,7 @@ document.addEventListener("click", event => {
     "smart-style": () => openModal("智能搭配", `<p>根据你当前选择的米白上衣，推荐轻酷叠穿、奶油柔光与先锋极简三种方向。</p><div class="look-row">${lookCard("assets/inspire-urban-v2.webp","轻酷叠穿","look-urban")}${lookCard("assets/inspire-soft-v2.webp","奶油柔光","look-soft")}${lookCard("assets/inspire-cool-v2.webp","先锋极简","look-cool")}</div>`),
     settings: () => go("settings"),
     "body-profile": () => go("bodyData"),
-    privacy: () => openModal("照片用途与隐私", `<p><b>本机保存：</b>数字形象、身体数据和试穿记录保存在当前手机浏览器中。</p><p><b>AI 处理：</b>首次建档会调用一次生成式服务，用于补全身体、转为正面站姿并移除包袋、海报和背景；生成后的白底形象缓存在本机。试穿时再把该数字形象与商品图发送至公共试穿模型。图片用于当次临时推理，不上传腾讯云 COS，也不会加入本应用的永久云端相册。请勿上传身份证件或其他敏感照片。</p><p><b>你的控制：</b>可在设置中删除照片、记录或全部本机个人数据。</p><button class="consent-row" data-action="toggle-consent"><span>${state.consent ? "✓" : ""}</span><b>允许在点击生成时发送图片至 AI 服务</b></button>`),
+    privacy: () => openModal("照片用途与隐私", `<p><b>本机保存：</b>数字形象、身体数据和试穿记录保存在当前手机浏览器中。</p><p><b>AI 处理：</b>${state.localApiBase ? "已连接你的电脑本地 AI。程序先检查正面姿态、头脚完整度与包袋遮挡，再制作标准白底形象；试穿也由你的 NVIDIA 显卡完成。无法可靠恢复的被遮挡身体会被拦截，不会伪造为真实身体。" : "当前使用公共试穿服务。首次建档和试穿图片只用于当次临时推理，不上传腾讯云 COS，也不会加入本应用的永久云端相册。"} 请勿上传身份证件或其他敏感照片。</p><p><b>你的控制：</b>可在设置中删除照片、记录或全部本机个人数据。</p><button class="consent-row" data-action="toggle-consent"><span>${state.consent ? "✓" : ""}</span><b>允许在点击生成时发送图片至 AI 服务</b></button>`),
     "style-pref": () => go("stylePrefs"),
     "toggle-pref": () => { const value=trigger.dataset.value; state.stylePrefs = state.stylePrefs.includes(value) ? state.stylePrefs.filter(x=>x!==value) : state.stylePrefs.length<4 ? [...state.stylePrefs,value] : state.stylePrefs; closeModal(); actions["style-pref"](); },
     "save-prefs": () => { savePreferences(); closeModal(); render(); toast("风格偏好已保存"); },
@@ -1962,6 +2102,46 @@ document.addEventListener("click", event => {
     "toggle-consent": () => { state.consent=!state.consent; savePreferences(); closeModal(); actions.privacy(); },
     account: () => openModal("本机显示名称", `<label class="data-field"><span>显示名称</span><div><input id="accountName" maxlength="12" value="${escapeHtml(state.userName)}" aria-label="显示名称"></div></label><p>显示名称和个人资料只保存在当前手机浏览器，不需要登录账号。</p>`, `<button class="primary-btn full" data-action="save-account">保存</button>`),
     "save-account": () => { const value=$("#accountName")?.value.trim(); if (value) state.userName=value.slice(0,12); saveProfile(); closeModal(); render(); toast("显示名称已保存"); },
+    "local-backend": () => openModal("连接电脑本地 AI", `<p>先在电脑运行本地后端，再用 Tailscale Serve 得到以 <b>https://</b> 开头的专属地址。照片只在你的手机与电脑之间传输。</p><p><a class="text-link" href="https://github.com/caochang0228-hub/caochang-portfolio/tree/main/tryon-local-backend" target="_blank" rel="noopener">打开 Windows 本地后端安装文件 ↗</a></p><label class="data-field"><span>本地后端地址</span><div><input id="localApiInput" inputmode="url" placeholder="https://电脑名.网络名.ts.net" value="${escapeHtml(state.localApiBase)}" aria-label="本地后端地址"></div></label><p class="modal-note">保存时会自动检测显卡、显存与服务状态；检测失败不会替换当前设置。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="clear-local-backend">停用本地 AI</button><button class="primary-btn" data-action="save-local-backend">检测并保存</button></div>`),
+    "save-local-backend": async () => {
+      const value = ($("#localApiInput")?.value || "").trim().replace(/\/$/, "");
+      if (!/^https:\/\//i.test(value) && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(value)) return toast("请输入 Tailscale 的 https 地址，或电脑本机的 127.0.0.1 地址");
+      trigger.disabled = true;
+      const oldText = trigger.textContent;
+      trigger.textContent = "正在检测…";
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000);
+      try {
+        const response = await fetch(`${value}/health`, { signal: controller.signal });
+        const health = await response.json().catch(() => ({}));
+        if (!response.ok || !health.ready || !health.cuda) throw new Error(health.error || "本地服务未就绪");
+        state.localApiBase = value;
+        localStorage.setItem("tryon-local-api", value);
+        state.profileReady = false;
+        state.avatarFingerprint = "";
+        await dbDelete("tryOnCache").catch(() => {});
+        closeModal();
+        render();
+        const memory = health.vram_gb ? ` · ${health.vram_gb}GB 显存` : "";
+        toast(`本地 AI 已连接：${health.gpu || "NVIDIA GPU"}${memory}`);
+      } catch (error) {
+        toast(error?.name === "AbortError" ? "连接超时，请确认本地服务与 Tailscale 正在运行" : `连接失败：${error?.message || "请检查地址"}`);
+      } finally {
+        clearTimeout(timer);
+        trigger.disabled = false;
+        trigger.textContent = oldText;
+      }
+    },
+    "clear-local-backend": async () => {
+      localStorage.removeItem("tryon-local-api");
+      state.localApiBase = "";
+      state.profileReady = false;
+      state.avatarFingerprint = "";
+      await dbDelete("tryOnCache").catch(() => {});
+      closeModal();
+      render();
+      toast("已停用电脑本地 AI，后续将使用公共服务");
+    },
     "delete-all-data": () => openModal("删除全部个人数据？", `<p>这会删除本机保存的个人照片、身体数据、风格偏好和全部试穿记录，无法撤销。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="confirm-delete-all">确认全部删除</button></div>`),
     "confirm-delete-all": async () => { await deleteAllLocalData(); closeModal(); state.screen="welcome"; state.history=[]; render(); toast("本机个人数据已全部删除"); },
     "retry-generate": () => { state.generationError=""; state.progress=0; go("generating", {replace:true}); },
@@ -1992,7 +2172,7 @@ setupPwa();
     await completeHfLoginIfPresent();
   } catch (error) {
     state.authError = error?.message || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261122-fix19`);
+    history.replaceState(null, "", `${location.pathname}?v=20261122-fix20`);
   }
   await loadAppData();
   await restoreHfLoginDraft();
