@@ -338,7 +338,7 @@ function avatarGeneratingPage() {
     <div class="scan-frame photo-scan">${state.personOriginalSrc || state.personSrc ? `<img src="${state.personOriginalSrc || state.personSrc}" alt="正在建立的个人形象">` : `<div class="scan-silhouette">♙</div>`}<i></i><span></span></div>
     <span class="micro-label">AI BODY PROFILE</span>
     <h2>正在建立你的<br>个人数字形象</h2>
-    <p id="avatarStatus">正在进行白底人物处理，不占用最终试穿的 GPU 额度</p>
+    <p id="avatarStatus">正在生成无包袋、无海报遮挡的正面白底数字形象</p>
     <div class="progress-wrap"><div class="progress-track"><div id="avatarProgressBar" class="progress-bar" style="width:${state.avatarProgress}%"></div></div><span id="avatarProgressNum" class="progress-num">${state.avatarProgress}%</span></div>
     <div class="generation-tags"><span>照片优化</span><span>数据建档</span><span>形象确认</span></div>
     <div class="info-strip"><span>✦</span><span>数字形象用于穿搭预览，不代表精确的人体测量或尺码建议。</span></div>
@@ -380,6 +380,7 @@ async function beginAvatarGeneration() {
     if (num) num.textContent = "100%";
     state.profileReady = true;
     await saveProfile();
+    await dbDelete("tryOnCache").catch(() => {});
     await delay(300);
     if (state.screen === "avatarGenerating") go("avatarResult", { replace: true });
   } catch (error) {
@@ -401,7 +402,7 @@ function avatarResultPage() {
   const shapeName = { slim: "纤细", balanced: "匀称", curvy: "曲线", athletic: "健体" }[state.bodyShape];
   return `<div class="avatar-result">
     <div class="avatar-stage"><img src="${state.personSrc}" alt="我的个人AI全身形象"><span>MY DIGITAL SELF</span><button data-action="favorite-avatar">♡</button></div>
-    <div class="avatar-result-copy"><span class="success-pill">✓ 白底数字形象已建立</span><h2>你好，这是你的<br>数字试穿形象</h2><p>人物已完成白底整理并缓存在本机；后续试穿不会重复处理这张照片。</p></div>
+    <div class="avatar-result-copy"><span class="success-pill">✓ 白底数字形象已建立</span><h2>你好，这是你的<br>数字试穿形象</h2><p>已清理背景、海报与手持物，并缓存在本机；后续试穿不会重复处理这张照片。</p></div>
     <div class="avatar-data-row"><span><b>${state.bodyData.height}</b> cm<small>身高</small></span><span><b>${state.bodyData.weight}</b> kg<small>体重</small></span><span><b>${shapeName}</b><small>身形</small></span></div>
     <div class="button-row"><button class="ghost-btn" data-action="avatar-adjust">调整数据</button><button class="primary-btn fashion-btn" data-action="avatar-use">使用此形象 ›</button></div>
     <button class="text-action" data-action="avatar-upload-photo">更换真人全身照</button>
@@ -525,7 +526,7 @@ async function beginGeneration() {
     updateGenerationStatus();
     const protectedResult = await protectIdentityFace(
       response.image,
-      state.personOriginalSrc || state.personSrc
+      state.personSrc
     );
     state.resultSrc = protectedResult;
     state.requestId = response.requestId || "";
@@ -547,7 +548,7 @@ async function beginGeneration() {
 }
 
 function generationErrorPage() {
-  return `<div class="generation error-state"><div class="error-orbit">!</div><span class="micro-label">GENERATION STOPPED</span><h2>这次没有生成成功</h2><p>${escapeHtml(state.generationError || "服务暂时不可用，请稍后重试。")}</p><div class="tips-card"><h4>你可以检查</h4><p>✓ 商品区域是否完整，且没有包袋、手臂等大面积遮挡</p><p>✓ 商品来源是否选对“模特上身图 / 单件商品图”</p><p>✓ 具体款式是否与毛衣、夹克、裙装等类别一致</p>${state.requestId ? `<p>请求编号：${escapeHtml(state.requestId)}</p>` : ""}</div><div class="button-row"><button class="ghost-btn" data-action="back-to-confirm">返回检查</button><button class="primary-btn" data-action="retry-generate">重新生成</button></div></div>`;
+  return `<div class="generation error-state"><div class="error-orbit">!</div><span class="micro-label">GENERATION STOPPED</span><h2>这次没有生成成功</h2><p>${escapeHtml(state.generationError || "服务暂时不可用，请稍后重试。")}</p><div class="tips-card"><h4>你可以检查</h4><p>✓ 个人形象是否为干净白底，且没有包袋、海报或第二张人脸</p><p>✓ 商品区域是否完整，且没有包袋、手臂等大面积遮挡</p><p>✓ 商品来源是否选对“模特上身图 / 单件商品图”</p><p>✓ 具体款式是否与毛衣、夹克、裙装等类别一致</p>${state.requestId ? `<p>请求编号：${escapeHtml(state.requestId)}</p>` : ""}</div><div class="button-row"><button class="ghost-btn" data-action="back-to-confirm">返回检查</button><button class="primary-btn" data-action="retry-generate">重新生成</button></div></div>`;
 }
 
 function resultPage() {
@@ -666,7 +667,7 @@ function settingsPage() {
   <div class="settings-section"><h3>隐私与本机资料</h3><div class="menu-list"><button class="menu-item" data-action="privacy"><span>▣</span><b>隐私与授权</b><small>相机、相册、数据权限 ›</small></button><button class="menu-item" data-action="account"><span>◉</span><b>显示名称</b><small>仅保存在本机 ›</small></button></div></div>
   <div class="settings-section"><h3>服务与帮助</h3><div class="menu-list"><button class="menu-item" data-action="help"><span>?</span><b>客服帮助</b><small>在线咨询 · 常见问题 ›</small></button></div></div>
   <button class="danger-btn" data-action="delete-all-data">删除本机全部个人数据</button>
-  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v2.2 姿态贴合与双节点版</p>`;
+  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v2.3 形象净化与人脸对齐版</p>`;
 }
 
 function bindInputs() {
@@ -898,7 +899,7 @@ async function completeHfLoginIfPresent() {
   const oauthError = params.get("error");
   if (oauthError) {
     state.authError = params.get("error_description") || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261120-fix16`);
+    history.replaceState(null, "", `${location.pathname}?v=20261122-fix17`);
     return;
   }
   if (!code) return;
@@ -932,7 +933,7 @@ async function completeHfLoginIfPresent() {
   state.hfUser = userInfo;
   state.authError = "";
   state.justLoggedIn = true;
-  history.replaceState(null, "", `${location.pathname}?v=20261120-fix16`);
+  history.replaceState(null, "", `${location.pathname}?v=20261122-fix17`);
 }
 
 function logoutHf() {
@@ -955,7 +956,7 @@ async function computeTryOnFingerprint() {
     garmentType: state.garmentType,
     garmentSubtype: state.garmentSubtype,
     garmentPhotoMode: state.garmentPhotoMode,
-    engine: "leffa-24-densepose-failover-v3"
+    engine: "leffa-24-clean-avatar-face-align-v4"
   });
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
   return base64Url(digest);
@@ -1085,6 +1086,75 @@ function loadImage(src) {
   });
 }
 
+function inspectWhiteBackground(image) {
+  const sample = document.createElement("canvas");
+  const maxSide = 260;
+  const scale = Math.min(1, maxSide / Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height));
+  sample.width = Math.max(1, Math.round((image.naturalWidth || image.width) * scale));
+  sample.height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale));
+  const ctx = sample.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(image, 0, 0, sample.width, sample.height);
+  const pixels = ctx.getImageData(0, 0, sample.width, sample.height).data;
+  let foreground = 0;
+  let ringPixels = 0;
+  let ringWhite = 0;
+  let minX = sample.width;
+  let minY = sample.height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < sample.height; y += 1) {
+    for (let x = 0; x < sample.width; x += 1) {
+      const offset = (y * sample.width + x) * 4;
+      const r = pixels[offset];
+      const g = pixels[offset + 1];
+      const b = pixels[offset + 2];
+      const isWhite = r > 242 && g > 242 && b > 242 && Math.max(r, g, b) - Math.min(r, g, b) < 10;
+      const inRing = x < sample.width * 0.12 || x > sample.width * 0.88 || y < sample.height * 0.10 || y > sample.height * 0.90;
+      if (inRing) {
+        ringPixels += 1;
+        if (isWhite) ringWhite += 1;
+      }
+      if (!isWhite) {
+        foreground += 1;
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+  }
+  const total = sample.width * sample.height;
+  const box = maxX >= minX && maxY >= minY ? {
+    x: minX / sample.width,
+    y: minY / sample.height,
+    width: (maxX - minX + 1) / sample.width,
+    height: (maxY - minY + 1) / sample.height
+  } : null;
+  return {
+    box,
+    foregroundRatio: foreground / Math.max(1, total),
+    ringWhiteRatio: ringWhite / Math.max(1, ringPixels)
+  };
+}
+
+async function validateCleanAvatar(src) {
+  const image = await loadImage(src);
+  const analysis = inspectWhiteBackground(image);
+  const clean = Boolean(
+    analysis.box &&
+    analysis.ringWhiteRatio >= 0.72 &&
+    analysis.foregroundRatio >= 0.045 &&
+    analysis.foregroundRatio <= 0.54 &&
+    analysis.box.height >= 0.48
+  );
+  if (!clean) {
+    const error = new Error("AVATAR_BACKGROUND_OR_OCCLUSION_INVALID");
+    error.analysis = analysis;
+    throw error;
+  }
+  return { image, analysis };
+}
+
 async function applyProductCrop() {
   const source = state.productOriginalSrc || state.productSrc;
   const image = await loadImage(source);
@@ -1127,39 +1197,95 @@ async function applyPersonCrop() {
   state.singlePersonConfirmed = false;
 }
 
+async function detectPrimaryFace(image, expectedBox) {
+  if (!("FaceDetector" in globalThis)) return null;
+  try {
+    const detector = new FaceDetector({ fastMode: false, maxDetectedFaces: 5 });
+    const faces = await detector.detect(image);
+    if (!faces.length) return null;
+    const expectedX = (expectedBox.x + expectedBox.width * 0.5) * image.naturalWidth;
+    const expectedY = (expectedBox.y + expectedBox.height * 0.10) * image.naturalHeight;
+    return faces
+      .filter(face => face.boundingBox.width < image.naturalWidth * 0.38)
+      .sort((a, b) => {
+        const acx = a.boundingBox.x + a.boundingBox.width / 2;
+        const acy = a.boundingBox.y + a.boundingBox.height / 2;
+        const bcx = b.boundingBox.x + b.boundingBox.width / 2;
+        const bcy = b.boundingBox.y + b.boundingBox.height / 2;
+        return Math.hypot(acx - expectedX, acy - expectedY) - Math.hypot(bcx - expectedX, bcy - expectedY);
+      })[0]?.boundingBox || null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function estimatedFaceRect(box, width, height) {
+  const bodyX = box.x * width;
+  const bodyY = box.y * height;
+  const bodyW = box.width * width;
+  const bodyH = box.height * height;
+  const faceW = bodyW * 0.24;
+  const faceH = bodyH * 0.14;
+  return {
+    x: bodyX + (bodyW - faceW) / 2,
+    y: bodyY + bodyH * 0.015,
+    width: faceW,
+    height: faceH
+  };
+}
+
+function drawFeatheredFace(ctx, identity, sourceRect, targetRect) {
+  const padX = sourceRect.width * 0.34;
+  const padY = sourceRect.height * 0.28;
+  const sx = Math.max(0, sourceRect.x - padX);
+  const sy = Math.max(0, sourceRect.y - padY);
+  const sw = Math.min(identity.naturalWidth - sx, sourceRect.width + padX * 2);
+  const sh = Math.min(identity.naturalHeight - sy, sourceRect.height + padY * 2);
+  const dx = targetRect.x - targetRect.width * 0.34;
+  const dy = targetRect.y - targetRect.height * 0.28;
+  const dw = targetRect.width * 1.68;
+  const dh = targetRect.height * 1.56;
+  const patch = document.createElement("canvas");
+  patch.width = Math.max(1, Math.round(dw));
+  patch.height = Math.max(1, Math.round(dh));
+  const patchCtx = patch.getContext("2d");
+  patchCtx.drawImage(identity, sx, sy, sw, sh, 0, 0, patch.width, patch.height);
+  patchCtx.globalCompositeOperation = "destination-in";
+  const gradient = patchCtx.createRadialGradient(patch.width / 2, patch.height * 0.48, patch.width * 0.20, patch.width / 2, patch.height * 0.48, patch.width * 0.53);
+  gradient.addColorStop(0, "rgba(0,0,0,.96)");
+  gradient.addColorStop(0.55, "rgba(0,0,0,.82)");
+  gradient.addColorStop(1, "rgba(0,0,0,0)");
+  patchCtx.fillStyle = gradient;
+  patchCtx.fillRect(0, 0, patch.width, patch.height);
+  ctx.save();
+  ctx.globalAlpha = 0.86;
+  ctx.drawImage(patch, dx, dy, dw, dh);
+  ctx.restore();
+}
+
 async function protectIdentityFace(resultSrc, identitySrc) {
   try {
     const [result, identity] = await Promise.all([loadImage(resultSrc), loadImage(identitySrc)]);
+    const resultAnalysis = inspectWhiteBackground(result);
+    const identityAnalysis = inspectWhiteBackground(identity);
+    if (!resultAnalysis.box || !identityAnalysis.box || resultAnalysis.ringWhiteRatio < 0.66 || identityAnalysis.ringWhiteRatio < 0.72) {
+      return resultSrc;
+    }
     const canvas = document.createElement("canvas");
     canvas.width = result.naturalWidth || 768;
     canvas.height = result.naturalHeight || 1024;
     const ctx = canvas.getContext("2d", { alpha: false });
     ctx.drawImage(result, 0, 0, canvas.width, canvas.height);
-    const overlay = document.createElement("canvas");
-    overlay.width = canvas.width;
-    overlay.height = canvas.height;
-    const overlayCtx = overlay.getContext("2d");
-    overlayCtx.drawImage(identity, 0, 0, canvas.width, canvas.height);
-    overlayCtx.globalCompositeOperation = "destination-in";
-    const cx = canvas.width * 0.5;
-    const cy = canvas.height * 0.14;
-    const rx = canvas.width * 0.09;
-    const ry = canvas.height * 0.09;
-    overlayCtx.save();
-    overlayCtx.translate(cx, cy);
-    overlayCtx.scale(rx, ry);
-    const feather = overlayCtx.createRadialGradient(0, 0, 0.55, 0, 0, 1);
-    feather.addColorStop(0, "rgba(0,0,0,1)");
-    feather.addColorStop(0.72, "rgba(0,0,0,.92)");
-    feather.addColorStop(1, "rgba(0,0,0,0)");
-    overlayCtx.fillStyle = feather;
-    overlayCtx.beginPath();
-    overlayCtx.arc(0, 0, 1, 0, Math.PI * 2);
-    overlayCtx.fill();
-    overlayCtx.restore();
-    ctx.globalAlpha = 0.94;
-    ctx.drawImage(overlay, 0, 0);
-    ctx.globalAlpha = 1;
+    const [sourceFace, resultFace] = await Promise.all([
+      detectPrimaryFace(identity, identityAnalysis.box),
+      detectPrimaryFace(result, resultAnalysis.box)
+    ]);
+    const safeSourceFace = sourceFace || estimatedFaceRect(identityAnalysis.box, identity.naturalWidth, identity.naturalHeight);
+    const safeResultFace = resultFace || estimatedFaceRect(resultAnalysis.box, canvas.width, canvas.height);
+    const sourceAspect = safeSourceFace.width / Math.max(1, safeSourceFace.height);
+    const resultAspect = safeResultFace.width / Math.max(1, safeResultFace.height);
+    if (sourceAspect < 0.52 || sourceAspect > 1.35 || resultAspect < 0.52 || resultAspect > 1.35) return resultSrc;
+    drawFeatheredFace(ctx, identity, safeSourceFace, safeResultFace);
     return canvas.toDataURL("image/jpeg", 0.93);
   } catch (error) {
     return resultSrc;
@@ -1274,24 +1400,36 @@ async function createWhiteBackgroundAvatar(source) {
 async function createQuotaFreeAvatar(source) {
   if (!source) throw new Error("MISSING_PERSON_IMAGE");
   const status = $("#avatarStatus");
-  if (status) status.textContent = "正在通过 CPU 提取人物并生成白底形象，不占用试穿 GPU…";
+  const failures = [];
+  if (status) status.textContent = "正在移除包袋、海报与遮挡物，并生成正面白底数字形象…";
   try {
+    const generated = await createDigitalAvatar(source);
+    await validateCleanAvatar(generated);
+    return generated;
+  } catch (error) {
+    failures.push(`生成式通道:${String(error?.message || error || "UNKNOWN")}`);
+  }
+  try {
+    if (status) status.textContent = "生成式通道繁忙，正在尝试高精度人物分离…";
     const blob = await fetch(source).then(response => response.blob());
     const uploaded = await uploadToGradio(AVATAR_CPU_FALLBACK, blob, "person.jpg");
     const result = await callGradioDirect(AVATAR_CPU_FALLBACK, "update_ui", [uploaded, "PNG"], { timeout: 180000 });
     let file = extractRemoteFile(result?.[1] || result?.[0]);
     if (!file) throw new Error("CPU_AVATAR_EMPTY_RESULT");
     if (!/^https?:|^data:/i.test(file)) file = `${AVATAR_CPU_FALLBACK}/gradio_api/file=${encodeURIComponent(file)}`;
-    return await compositeOnWhite(file);
+    const cutout = await compositeOnWhite(file);
+    await validateCleanAvatar(cutout);
+    return cutout;
   } catch (error) {
-    if (status) status.textContent = "CPU 人物提取暂不可用，正在使用本机白底整理…";
-    return await compositeOnWhite(source);
+    failures.push(`人物分离通道:${String(error?.message || error || "UNKNOWN")}`);
+    throw new Error(`AVATAR_CLEANUP_REQUIRED | ${failures.join(" | ")}`);
   }
 }
 
 function friendlyAvatarError(error) {
   const text = String(error?.message || error || "");
   if (error?.name === "AbortError" || /TIMEOUT/i.test(text)) return "人物白底处理等待超时，请稍后重新尝试。";
+  if (/AVATAR_CLEANUP_REQUIRED|AVATAR_BACKGROUND_OR_OCCLUSION_INVALID/i.test(text)) return "没有得到干净的单人白底形象。请更换为正面、头脚完整、没有包袋和海报人脸遮挡的照片后重试。";
   if (/HF_START_422|validation error|field required|missing/i.test(text)) return "人物处理接口暂时不可用，请刷新页面后重试。";
   if (/HF_UPLOAD|Failed to fetch|network|fetch/i.test(text)) return "手机网络暂时无法连接人物处理服务，请切换稳定 Wi-Fi 后重试。";
   return text.length < 120 ? text : "白底人物处理暂时不可用，请稍后重试。";
@@ -1376,6 +1514,12 @@ async function callTryOnApi() {
   if (!CONFIG.apiBase && !CONFIG.spaceId) throw new Error("AI_BACKEND_NOT_CONFIGURED");
   if (!state.personSrc || !state.productSrc) throw new Error("MISSING_IMAGES");
 
+  await validateCleanAvatar(state.personSrc).catch(() => {
+    const error = new Error("PERSON_AVATAR_NOT_CLEAN");
+    error.code = "PERSON_AVATAR_NOT_CLEAN";
+    throw error;
+  });
+
   if (CONFIG.apiMode === "hf-public-leffa") {
     const requestId = globalThis.crypto?.randomUUID?.() || `tryon-${Date.now()}`;
     state.requestId = requestId;
@@ -1443,6 +1587,7 @@ function friendlyApiError(error) {
   const code = String(error?.code || "");
   if (text.includes("AI_BACKEND_NOT_CONFIGURED")) return "免费 AI 空间尚未绑定。完成 Hugging Face Space 部署后即可真实生成。";
   if (text.includes("MISSING_IMAGES")) return "缺少人物照或商品图，请返回重新上传。";
+  if (code === "PERSON_AVATAR_NOT_CLEAN" || /PERSON_AVATAR_NOT_CLEAN/i.test(text)) return "当前个人形象仍含背景、海报或遮挡物，已停止试穿以避免双脸和多余物体。请先重新建立白底数字形象。";
   if (code === "NO_PERSON_DETECTED" || /NO_PERSON_DETECTED/i.test(text)) return "数字形象没有被识别为完整正面全身照，请重新生成人物形象后再试穿。";
   if (code === "NO_GARMENT_FOUND" || /NO_GARMENT_FOUND/i.test(text)) return "没有从商品图中提取到所选服装，请检查具体款式以及“模特上身图 / 单件商品图”设置。";
   if (code === "BAD_IMAGE" || /BAD_IMAGE/i.test(text)) return "人物图或商品图不符合模型输入要求，请返回重新裁剪。";
@@ -1495,7 +1640,7 @@ async function dbDelete(key) {
 }
 
 async function saveProfile() {
-  const profile = { bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender, userName: state.userName, avatarFingerprint: state.avatarFingerprint, avatarVersion: 5, updatedAt: Date.now() };
+  const profile = { bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender, userName: state.userName, avatarFingerprint: state.avatarFingerprint, avatarVersion: 6, updatedAt: Date.now() };
   if (state.usingDemo) { state.profileReady = true; return; }
   localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
   if (state.personSrc) await dbSet("profileImage", state.personSrc);
@@ -1540,9 +1685,14 @@ async function loadAppData() {
       state.stylePrefs = Array.isArray(prefs.stylePrefs) ? prefs.stylePrefs : state.stylePrefs;
       state.consent = prefs.consent !== false;
     }
-    state.personSrc = profileImage || "";
+    const currentAvatar = Boolean(profile && profileImage && profile.avatarVersion === 6);
     state.personOriginalSrc = profileOriginalImage || profileImage || "";
-    state.profileReady = Boolean(profile && profileImage && profile.avatarVersion === 5);
+    state.personSrc = currentAvatar ? profileImage : state.personOriginalSrc;
+    state.profileReady = currentAvatar;
+    if (!currentAvatar && profileImage) {
+      state.avatarFingerprint = "";
+      await dbDelete("tryOnCache").catch(() => {});
+    }
     state.records = Array.isArray(records) ? records : [];
   } catch (error) {
     console.warn("Local profile could not be loaded", error);
@@ -1730,7 +1880,7 @@ document.addEventListener("click", event => {
     "smart-style": () => openModal("智能搭配", `<p>根据你当前选择的米白上衣，推荐轻酷叠穿、奶油柔光与先锋极简三种方向。</p><div class="look-row">${lookCard("assets/inspire-urban-v2.webp","轻酷叠穿","look-urban")}${lookCard("assets/inspire-soft-v2.webp","奶油柔光","look-soft")}${lookCard("assets/inspire-cool-v2.webp","先锋极简","look-cool")}</div>`),
     settings: () => go("settings"),
     "body-profile": () => go("bodyData"),
-    privacy: () => openModal("照片用途与隐私", `<p><b>本机保存：</b>数字形象、身体数据和试穿记录保存在当前手机浏览器中。</p><p><b>AI 处理：</b>数字形象阶段仅进行 CPU 白底人物处理，不调用生成式 GPU；最终试穿时才把数字形象与商品图发送至公共试穿模型。图片用于当次临时推理，不上传腾讯云 COS，也不会加入本应用的永久云端相册。请勿上传身份证件或其他敏感照片。</p><p><b>你的控制：</b>可在设置中删除照片、记录或全部本机个人数据。</p><button class="consent-row" data-action="toggle-consent"><span>${state.consent ? "✓" : ""}</span><b>允许在点击生成时发送图片至 AI 服务</b></button>`),
+    privacy: () => openModal("照片用途与隐私", `<p><b>本机保存：</b>数字形象、身体数据和试穿记录保存在当前手机浏览器中。</p><p><b>AI 处理：</b>首次建档会调用一次生成式服务，用于补全身体、转为正面站姿并移除包袋、海报和背景；生成后的白底形象缓存在本机。试穿时再把该数字形象与商品图发送至公共试穿模型。图片用于当次临时推理，不上传腾讯云 COS，也不会加入本应用的永久云端相册。请勿上传身份证件或其他敏感照片。</p><p><b>你的控制：</b>可在设置中删除照片、记录或全部本机个人数据。</p><button class="consent-row" data-action="toggle-consent"><span>${state.consent ? "✓" : ""}</span><b>允许在点击生成时发送图片至 AI 服务</b></button>`),
     "style-pref": () => go("stylePrefs"),
     "toggle-pref": () => { const value=trigger.dataset.value; state.stylePrefs = state.stylePrefs.includes(value) ? state.stylePrefs.filter(x=>x!==value) : state.stylePrefs.length<4 ? [...state.stylePrefs,value] : state.stylePrefs; closeModal(); actions["style-pref"](); },
     "save-prefs": () => { savePreferences(); closeModal(); render(); toast("风格偏好已保存"); },
@@ -1740,7 +1890,7 @@ document.addEventListener("click", event => {
     "delete-photo": () => openModal("删除个人照片？", `<p>删除后，现有试穿记录仍会保留，但再次生成前必须上传新的全身照。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="confirm-delete-photo">确认删除</button></div>`),
     "confirm-delete-photo": async () => { await Promise.all([dbDelete("profileImage"),dbDelete("profileOriginalImage")]); localStorage.removeItem(PROFILE_KEY); state.personSrc=""; state.personOriginalSrc=""; state.avatarFingerprint=""; state.profileReady=false; closeModal(); render(); toast("个人照片已删除"); },
     more: () => openModal("更多操作", `<div class="option-list"><button class="option-row" data-action="privacy"><span class="row-icon">▣</span><span><b>隐私说明</b></span><span class="chev">›</span></button><button class="option-row" data-action="help"><span class="row-icon">?</span><span><b>使用帮助</b></span><span class="chev">›</span></button></div>`),
-    help: () => openModal("使用帮助", `<p><b>首次使用：</b>上传正面、无遮挡、头脚完整的个人全身照 → 填写身体数据 → 生成可缓存的白底形象。</p><p><b>试穿：</b>上传商品图 → 确认“模特上身图 / 单件商品图” → 选择毛衣、夹克等具体款式 → 仅在最后一步调用免费 GPU。</p><p><b>额度节省：</b>相同人物和商品会直接读取缓存；更换人物、商品或服装类型才会重新生成。</p>`),
+    help: () => openModal("使用帮助", `<p><b>首次使用：</b>上传正面、无遮挡、头脚完整的个人全身照 → 填写身体数据 → 生成可缓存的白底形象。请避开手持包袋、明星海报、镜面人像和大面积前景遮挡。</p><p><b>试穿：</b>上传商品图 → 确认“模特上身图 / 单件商品图” → 选择毛衣、夹克等具体款式 → 开始生成。</p><p><b>额度节省：</b>数字形象只需生成一次；相同人物和商品会直接读取缓存。更换人物、商品或服装类型才会重新生成。</p>`),
     message: () => openModal("消息通知", `<div class="empty-state small"><span>♧</span><h3>暂无新消息</h3><p>生成完成、服务状态与隐私更新会显示在这里。</p></div>`),
     upgrade: () => openModal("AI 服务说明", `<p>当前版本使用 Hugging Face ZeroGPU 的开源试穿模型，不收取费用；匿名用户每天有少量 GPU 额度，高峰期可能排队。</p>`),
     manage: () => openModal("管理试穿记录", `<p>当前共有 <b>${state.records.length}</b> 条本机记录。</p>`, `<div class="button-row"><button class="ghost-btn" data-action="close-modal">取消</button><button class="primary-btn" data-action="clear-records">全部清理</button></div>`),
@@ -1780,7 +1930,7 @@ setupPwa();
     await completeHfLoginIfPresent();
   } catch (error) {
     state.authError = error?.message || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261120-fix16`);
+    history.replaceState(null, "", `${location.pathname}?v=20261122-fix17`);
   }
   await loadAppData();
   await restoreHfLoginDraft();
