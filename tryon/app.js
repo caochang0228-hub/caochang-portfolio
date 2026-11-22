@@ -470,7 +470,7 @@ function confirmPage() {
     <button class="setting-row" data-action="style-pref"><span>♙</span><span>风格偏好</span><b>${state.stylePrefs.join(" · ") || "未设置"} ›</b></button>
     <div class="setting-row"><span>✧</span><span>生成预览</span><b>姿态贴合（1张） ›</b></div>
   </div>
-  <div class="info-strip"><span>ⓘ</span><span>按人物姿态和身体区域生成服装贴合，并在本机保护原始人脸。</span></div>
+  <div class="info-strip"><span>ⓘ</span><span>按人物姿态和身体区域生成服装贴合，不再进行可能造成重影的手动人脸覆盖。</span></div>
   <div class="sticky-actions"><button class="primary-btn full" data-action="generate">✧ 开始 AI 试穿</button></div>`;
 }
 
@@ -522,12 +522,9 @@ async function beginGeneration() {
       return;
     }
     const response = await callTryOnApi();
-    state.queueMessage = "正在保护人脸特征并整理服装轮廓…";
+    state.queueMessage = "正在检查人物轮廓与服装贴合效果…";
     updateGenerationStatus();
-    const protectedResult = await protectIdentityFace(
-      response.image,
-      state.personSrc
-    );
+    const protectedResult = response.image;
     state.resultSrc = protectedResult;
     state.requestId = response.requestId || "";
     await dbSet("tryOnCache", { fingerprint, image: protectedResult, requestId: state.requestId, createdAt: Date.now() }).catch(() => {});
@@ -667,7 +664,7 @@ function settingsPage() {
   <div class="settings-section"><h3>隐私与本机资料</h3><div class="menu-list"><button class="menu-item" data-action="privacy"><span>▣</span><b>隐私与授权</b><small>相机、相册、数据权限 ›</small></button><button class="menu-item" data-action="account"><span>◉</span><b>显示名称</b><small>仅保存在本机 ›</small></button></div></div>
   <div class="settings-section"><h3>服务与帮助</h3><div class="menu-list"><button class="menu-item" data-action="help"><span>?</span><b>客服帮助</b><small>在线咨询 · 常见问题 ›</small></button></div></div>
   <button class="danger-btn" data-action="delete-all-data">删除本机全部个人数据</button>
-  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v2.3 形象净化与人脸对齐版</p>`;
+  <p style="text-align:center;color:#999;font-size:10px;margin-top:26px">TRY ON｜试一试　v2.4 强遮挡拦截版</p>`;
 }
 
 function bindInputs() {
@@ -899,7 +896,7 @@ async function completeHfLoginIfPresent() {
   const oauthError = params.get("error");
   if (oauthError) {
     state.authError = params.get("error_description") || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261122-fix18`);
+    history.replaceState(null, "", `${location.pathname}?v=20261122-fix19`);
     return;
   }
   if (!code) return;
@@ -933,7 +930,7 @@ async function completeHfLoginIfPresent() {
   state.hfUser = userInfo;
   state.authError = "";
   state.justLoggedIn = true;
-  history.replaceState(null, "", `${location.pathname}?v=20261122-fix18`);
+  history.replaceState(null, "", `${location.pathname}?v=20261122-fix19`);
 }
 
 function logoutHf() {
@@ -944,7 +941,7 @@ function logoutHf() {
 }
 
 async function computeAvatarFingerprint(source) {
-  const profile = JSON.stringify({ source, bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender });
+  const profile = JSON.stringify({ source, bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender, engine: "avatar-rebuild-v7" });
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(profile));
   return base64Url(digest);
 }
@@ -956,7 +953,7 @@ async function computeTryOnFingerprint() {
     garmentType: state.garmentType,
     garmentSubtype: state.garmentSubtype,
     garmentPhotoMode: state.garmentPhotoMode,
-    engine: "leffa-24-clean-avatar-face-align-v4"
+    engine: "leffa-24-clean-avatar-no-face-paste-v5"
   });
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
   return base64Url(digest);
@@ -1130,29 +1127,105 @@ function inspectWhiteBackground(image) {
     width: (maxX - minX + 1) / sample.width,
     height: (maxY - minY + 1) / sample.height
   } : null;
+  let torsoForeground = 0;
+  let torsoDark = 0;
+  let torsoEdges = 0;
+  let torsoCoreForeground = 0;
+  let torsoCoreDark = 0;
+  let torsoCoreEdges = 0;
+  let torsoRows = 0;
+  let torsoWidthTotal = 0;
+  if (box) {
+    const bx = Math.round(box.x * sample.width);
+    const by = Math.round(box.y * sample.height);
+    const bw = Math.max(1, Math.round(box.width * sample.width));
+    const bh = Math.max(1, Math.round(box.height * sample.height));
+    const tx1 = Math.max(0, Math.round(bx + bw * 0.12));
+    const tx2 = Math.min(sample.width - 1, Math.round(bx + bw * 0.88));
+    const ty1 = Math.max(0, Math.round(by + bh * 0.20));
+    const ty2 = Math.min(sample.height - 1, Math.round(by + bh * 0.54));
+    const coreX1 = Math.max(0, Math.round(bx + bw * 0.31));
+    const coreX2 = Math.min(sample.width - 1, Math.round(bx + bw * 0.69));
+    const coreY1 = Math.max(0, Math.round(by + bh * 0.27));
+    const coreY2 = Math.min(sample.height - 1, Math.round(by + bh * 0.52));
+    for (let y = ty1; y <= ty2; y += 1) {
+      let rowMin = sample.width;
+      let rowMax = -1;
+      for (let x = tx1; x <= tx2; x += 1) {
+        const index = (y * sample.width + x) * 4;
+        const r = pixels[index];
+        const g = pixels[index + 1];
+        const b = pixels[index + 2];
+        const white = r > 242 && g > 242 && b > 242 && Math.max(r, g, b) - Math.min(r, g, b) < 10;
+        if (white) continue;
+        torsoForeground += 1;
+        rowMin = Math.min(rowMin, x);
+        rowMax = Math.max(rowMax, x);
+        const luminance = r * 0.2126 + g * 0.7152 + b * 0.0722;
+        if (luminance < 92) torsoDark += 1;
+        const inCore = x >= coreX1 && x <= coreX2 && y >= coreY1 && y <= coreY2;
+        if (inCore) {
+          torsoCoreForeground += 1;
+          if (luminance < 92) torsoCoreDark += 1;
+        }
+        if (x < tx2) {
+          const next = index + 4;
+          const nextLuminance = pixels[next] * 0.2126 + pixels[next + 1] * 0.7152 + pixels[next + 2] * 0.0722;
+          if (Math.abs(luminance - nextLuminance) > 58) {
+            torsoEdges += 1;
+            if (inCore) torsoCoreEdges += 1;
+          }
+        }
+      }
+      if (rowMax >= rowMin) {
+        torsoRows += 1;
+        torsoWidthTotal += (rowMax - rowMin + 1) / bw;
+      }
+    }
+  }
   return {
     box,
     foregroundRatio: foreground / Math.max(1, total),
-    ringWhiteRatio: ringWhite / Math.max(1, ringPixels)
+    ringWhiteRatio: ringWhite / Math.max(1, ringPixels),
+    torsoDarkRatio: torsoDark / Math.max(1, torsoForeground),
+    torsoEdgeRatio: torsoEdges / Math.max(1, torsoForeground),
+    torsoCoreDarkRatio: torsoCoreDark / Math.max(1, torsoCoreForeground),
+    torsoCoreEdgeRatio: torsoCoreEdges / Math.max(1, torsoCoreForeground),
+    torsoWidthRatio: torsoWidthTotal / Math.max(1, torsoRows)
   };
 }
 
 async function validateCleanAvatar(src) {
   const image = await loadImage(src);
   const analysis = inspectWhiteBackground(image);
+  let faceCount = null;
+  if ("FaceDetector" in globalThis) {
+    try {
+      const detector = new FaceDetector({ fastMode: false, maxDetectedFaces: 4 });
+      faceCount = (await detector.detect(image)).length;
+    } catch (error) {
+      faceCount = null;
+    }
+  }
   const clean = Boolean(
     analysis.box &&
     analysis.ringWhiteRatio >= 0.72 &&
     analysis.foregroundRatio >= 0.045 &&
     analysis.foregroundRatio <= 0.54 &&
-    analysis.box.height >= 0.48
+    analysis.box.height >= 0.48 &&
+    analysis.torsoDarkRatio <= 0.34 &&
+    analysis.torsoEdgeRatio <= 0.34 &&
+    analysis.torsoCoreDarkRatio <= 0.24 &&
+    analysis.torsoCoreEdgeRatio <= 0.28 &&
+    analysis.torsoWidthRatio <= 0.84 &&
+    (faceCount === null || faceCount === 1)
   );
   if (!clean) {
     const error = new Error("AVATAR_BACKGROUND_OR_OCCLUSION_INVALID");
-    error.analysis = analysis;
+    error.analysis = { ...analysis, faceCount };
     throw error;
   }
-  return { image, analysis };
+  return { image, analysis: { ...analysis, faceCount } };
 }
 
 async function applyProductCrop() {
@@ -1346,26 +1419,25 @@ async function compositeOnWhite(src) {
 async function createDigitalAvatar(source) {
   if (!source) throw new Error("MISSING_PERSON_IMAGE");
   const status = $("#avatarStatus");
-  if (status) status.textContent = "正在补全身体、调整正面站姿并保护人脸特征…";
-  const blob = await fetch(source).then(response => response.blob());
-  const uploaded = await uploadToGradio(AVATAR_GENERATOR_BASE, blob, "identity.jpg");
+  if (status) status.textContent = "正在先分离人物，避免海报与背景人脸干扰…";
+  const isolatedSource = await createWhiteBackgroundAvatar(source);
+  const blob = await fetch(isolatedSource).then(response => response.blob());
+  const uploaded = await uploadToGradio(AVATAR_GENERATOR_BASE, blob, "isolated-identity.jpg");
   const shape = { slim: "slim", balanced: "balanced", curvy: "curvy", athletic: "athletic" }[state.bodyShape] || "balanced";
   const prompt = [
-    "Create a photorealistic studio full-body photograph of the exact same person.",
-    "Turn the person to face the camera directly, standing straight in a neutral symmetrical pose with both arms slightly away from the torso.",
-    "Complete all missing or cropped body parts naturally from head to toe, including both hands, legs and feet.",
-    "Preserve the person's facial identity, facial proportions, skin tone, hairstyle and apparent age.",
+    "Create a NEW photorealistic full-body catalog avatar using only this person's facial identity, skin tone, hairstyle and approximate body proportions.",
+    "Do not copy the original pose, clothing, accessories or any object from the reference image.",
+    "Reconstruct one complete natural body from head to feet, facing directly toward the camera, symmetrical shoulders, both arms relaxed straight down beside the torso, both hands empty and fully visible, legs straight, feet fully visible.",
     `Use the supplied body profile as a visual guide: height ${state.bodyData.height} cm, weight ${state.bodyData.weight} kg, ${shape} body shape.`,
-    "Remove bags, handheld objects, posters, other people and background clutter.",
-    "Dress the person in a plain fitted neutral gray short-sleeve top and fitted black shorts suitable as a virtual try-on base.",
-    "Pure seamless white background, even soft studio lighting, realistic anatomy, natural hands, centered 3:4 composition, high detail."
+    "Remove every bag, shopping bag, handbag, package, poster, printed face, handheld object, accessory, background person and background clutter. Empty hands only.",
+    "Dress the person in a plain fitted medium-gray short-sleeve crew-neck top and plain fitted black shorts, with no logo, no pattern and no outerwear.",
+    "Pure seamless white background, even soft studio light, realistic anatomy, exactly one face, one head, two arms and two legs, no transparent limbs, no double exposure, no ghosting, centered 3:4 composition, high detail."
   ].join(" ");
+  const negativePrompt = "bag, handbag, shopping bag, package, poster, printed portrait, second person, duplicate face, extra head, extra arm, extra hand, extra leg, transparent limb, ghosting, double exposure, overlapping body, text, logo, object covering torso";
   const result = await callGradioDirect(
     AVATAR_GENERATOR_BASE,
     "edit",
-    // Quota-saving mode: native 4-step inference at 1024px, one result only.
-    // Face/hair locking remains enabled so identity stability is not traded away.
-    [uploaded, prompt, "", null, 0, true, 1.0, 4, true, 90, 1024, false, true],
+    [uploaded, prompt, negativePrompt, null, 0, true, 1.0, 8, true, 90, 1024, false, true],
     { timeout: 300000 }
   );
   let file = extractRemoteFile(Array.isArray(result) ? result[0] : result);
@@ -1406,29 +1478,13 @@ async function createWhiteBackgroundAvatar(source) {
 async function createQuotaFreeAvatar(source) {
   if (!source) throw new Error("MISSING_PERSON_IMAGE");
   const status = $("#avatarStatus");
-  const failures = [];
-  if (status) status.textContent = "正在移除包袋、海报与遮挡物，并生成正面白底数字形象…";
+  if (status) status.textContent = "正在重建无包袋、无海报、无重影的正面白底数字形象…";
   try {
     const generated = await createDigitalAvatar(source);
     await validateCleanAvatar(generated);
     return generated;
   } catch (error) {
-    failures.push(`生成式通道:${String(error?.message || error || "UNKNOWN")}`);
-  }
-  try {
-    if (status) status.textContent = "生成式通道繁忙，正在尝试高精度人物分离…";
-    const blob = await fetch(source).then(response => response.blob());
-    const uploaded = await uploadToGradio(AVATAR_CPU_FALLBACK, blob, "person.jpg");
-    const result = await callGradioDirect(AVATAR_CPU_FALLBACK, "update_ui", [uploaded, "PNG"], { timeout: 180000 });
-    let file = extractRemoteFile(result?.[1] || result?.[0]);
-    if (!file) throw new Error("CPU_AVATAR_EMPTY_RESULT");
-    if (!/^https?:|^data:/i.test(file)) file = `${AVATAR_CPU_FALLBACK}/gradio_api/file=${encodeURIComponent(file)}`;
-    const cutout = await compositeOnWhite(file);
-    await validateCleanAvatar(cutout);
-    return cutout;
-  } catch (error) {
-    failures.push(`人物分离通道:${String(error?.message || error || "UNKNOWN")}`);
-    throw new Error(`AVATAR_CLEANUP_REQUIRED | ${failures.join(" | ")}`);
+    throw new Error(`AVATAR_CLEANUP_REQUIRED | ${String(error?.message || error || "UNKNOWN")}`);
   }
 }
 
@@ -1646,7 +1702,7 @@ async function dbDelete(key) {
 }
 
 async function saveProfile() {
-  const profile = { bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender, userName: state.userName, avatarFingerprint: state.avatarFingerprint, avatarVersion: 6, updatedAt: Date.now() };
+  const profile = { bodyData: state.bodyData, bodyShape: state.bodyShape, gender: state.gender, userName: state.userName, avatarFingerprint: state.avatarFingerprint, avatarVersion: 7, updatedAt: Date.now() };
   if (state.usingDemo) { state.profileReady = true; return; }
   localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
   if (state.personSrc) await dbSet("profileImage", state.personSrc);
@@ -1691,7 +1747,7 @@ async function loadAppData() {
       state.stylePrefs = Array.isArray(prefs.stylePrefs) ? prefs.stylePrefs : state.stylePrefs;
       state.consent = prefs.consent !== false;
     }
-    const currentAvatar = Boolean(profile && profileImage && profile.avatarVersion === 6);
+    const currentAvatar = Boolean(profile && profileImage && profile.avatarVersion === 7);
     state.personOriginalSrc = profileOriginalImage || profileImage || "";
     state.personSrc = currentAvatar ? profileImage : state.personOriginalSrc;
     state.profileReady = currentAvatar;
@@ -1936,7 +1992,7 @@ setupPwa();
     await completeHfLoginIfPresent();
   } catch (error) {
     state.authError = error?.message || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261122-fix18`);
+    history.replaceState(null, "", `${location.pathname}?v=20261122-fix19`);
   }
   await loadAppData();
   await restoreHfLoginDraft();
