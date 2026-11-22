@@ -233,6 +233,7 @@ function welcomePage() {
     </div>
     <img class="splash-model" src="assets/hero-young-v2.webp" alt="年轻时尚的AI试穿示例模特">
     <button class="primary-btn full" data-action="start">${state.profileReady ? "进入我的试穿空间" : "上传全身照，建立个人形象"} <span>›</span></button>
+    <button class="text-action" data-action="local-backend">${state.localApiBase ? "✓ 已连接电脑本地 AI" : "使用我的电脑显卡（免费）"}</button>
   </div>`;
 }
 
