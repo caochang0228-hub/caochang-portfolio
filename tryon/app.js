@@ -321,7 +321,7 @@ function bodyDataPage() {
     </div>
   </div>
   <div class="privacy-line"><span>▣</span><p>身体数据仅用于本次数字形象与试穿预览，你可以随时删除。</p></div>
-  <div class="info-strip"><span>ⓘ</span><span>请上传正面、无遮挡、从头到脚完整的全身照。免费流程只做白底人物处理，不消耗试穿 GPU。</span></div>
+  <div class="info-strip"><span>ⓘ</span><span>首次建档会生成一次干净白底形象并缓存在本机，后续试穿不会重复生成数字形象。</span></div>
   <div class="sticky-actions"><button class="primary-btn full fashion-btn" data-action="generate-avatar">✦ 生成我的个人全身照</button></div>`;
 }
 
@@ -899,7 +899,7 @@ async function completeHfLoginIfPresent() {
   const oauthError = params.get("error");
   if (oauthError) {
     state.authError = params.get("error_description") || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261122-fix17`);
+    history.replaceState(null, "", `${location.pathname}?v=20261122-fix18`);
     return;
   }
   if (!code) return;
@@ -933,7 +933,7 @@ async function completeHfLoginIfPresent() {
   state.hfUser = userInfo;
   state.authError = "";
   state.justLoggedIn = true;
-  history.replaceState(null, "", `${location.pathname}?v=20261122-fix17`);
+  history.replaceState(null, "", `${location.pathname}?v=20261122-fix18`);
 }
 
 function logoutHf() {
@@ -1269,6 +1269,12 @@ async function protectIdentityFace(resultSrc, identitySrc) {
     const resultAnalysis = inspectWhiteBackground(result);
     const identityAnalysis = inspectWhiteBackground(identity);
     if (!resultAnalysis.box || !identityAnalysis.box || resultAnalysis.ringWhiteRatio < 0.66 || identityAnalysis.ringWhiteRatio < 0.72) {
+      return resultSrc;
+    }
+    const sourceCenterX = identityAnalysis.box.x + identityAnalysis.box.width / 2;
+    const resultCenterX = resultAnalysis.box.x + resultAnalysis.box.width / 2;
+    const bodyHeightRatio = resultAnalysis.box.height / Math.max(0.001, identityAnalysis.box.height);
+    if (Math.abs(sourceCenterX - resultCenterX) > 0.055 || Math.abs(identityAnalysis.box.y - resultAnalysis.box.y) > 0.055 || bodyHeightRatio < 0.84 || bodyHeightRatio > 1.18) {
       return resultSrc;
     }
     const canvas = document.createElement("canvas");
@@ -1930,7 +1936,7 @@ setupPwa();
     await completeHfLoginIfPresent();
   } catch (error) {
     state.authError = error?.message || "Hugging Face 登录没有完成";
-    history.replaceState(null, "", `${location.pathname}?v=20261122-fix17`);
+    history.replaceState(null, "", `${location.pathname}?v=20261122-fix18`);
   }
   await loadAppData();
   await restoreHfLoginDraft();
